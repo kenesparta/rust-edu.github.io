@@ -1,10 +1,10 @@
-+++
-title = "Announcing the 2026 Rust-Edu Refresh and CFP"
-date = 2026-04-26
-
-[extra]
-author = "Mordecai Etukudo and Bart Massey"
-+++
+---
+title: Announcing the 2026 Rust-Edu Refresh and CFP
+date: 2026-04-26
+authors:
+  - Mordecai Etukudo
+  - Bart Massey
+---
 
 
 # A New Chapter for Rust-Edu

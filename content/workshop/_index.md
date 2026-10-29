@@ -1,6 +1,6 @@
-+++
-title = "Rust Education Workshop 2022"
-+++
+---
+title: Rust Education Workshop 2022
+---
 
 The [Rust-Edu](http://rust-edu.org) Org 2022 Rust Education
 Workshop, a one-day virtual meeting to discuss the future of

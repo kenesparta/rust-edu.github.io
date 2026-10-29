@@ -1,6 +1,6 @@
-+++
-title = "Rust Education Workshop 2022 Paper Format"
-+++
+---
+title: Rust Education Workshop 2022 Paper Format
+---
 
 # LaTeX Refereed Paper Format
 

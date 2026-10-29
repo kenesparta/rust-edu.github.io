@@ -1,6 +1,6 @@
-+++
-title = "Rust Edu"
-+++
+---
+title: Rust Edu
+---
 
 ## Who are we?
 

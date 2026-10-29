@@ -1,10 +1,9 @@
-+++
-title = "Announcement: Rust-Edu"
-date = 2022-07-11
-
-[extra]
-author = "Bart Massey"
-+++
+---
+title: "Announcement: Rust-Edu"
+date: 2022-07-11
+authors:
+  - Bart Massey
+---
 
 Today we proudly and excitedly announce the formation of
 Rust-Edu, an organization dedicated to Rust education.

@@ -1,10 +1,9 @@
-+++
-title = "Campus Tour: Rust Africa"
-date = 2025-06-01
-
-[extra]
-author = "Mordecai Etukudo"
-+++
+---
+title: "Campus Tour: Rust Africa"
+date: 2025-06-01
+authors:
+  - Mordecai Etukudo
+---
 
 
 ## Rust Africa Campus Tour: Empowering the Next Generation

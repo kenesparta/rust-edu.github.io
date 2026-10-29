@@ -1,3 +1,4 @@
-+++
-template = "news.html"
-+++
+---
+title: News
+template: news.html
+---
