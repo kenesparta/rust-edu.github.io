@@ -51,4 +51,4 @@ involved in Rust and academia, or would like to be, we would
 love to have your help. Please visit us at
 [https://rust-edu.org](https://rust-edu.org/) or reach out
 by email at
-&lt;[contact@rust-edu.org](email:contact@rust-edu.org)&gt;.
+[contact@rust-edu.org](mailto:contact@rust-edu.org).
