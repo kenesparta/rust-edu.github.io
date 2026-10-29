@@ -1,6 +1,6 @@
 # Plan 0002 — Own Markdown Site Generator
 
-**Date:** 2026-10-28 · **Status:** draft for review · **Supersedes:** Spec 0001 and Plan 0001 (archived at tag
+**Date:** 2026-10-28 · **Status:** in progress (step 1 done) · **Supersedes:** Spec 0001 and Plan 0001 (archived at tag
 [`archive/initial-project-plan`](https://github.com/kenesparta/rust-edu.github.io/tree/archive/initial-project-plan/docs)
 on the fork kenesparta/rust-edu.github.io) · **Research:**
 [0001 inventory](../research/0001-current-site-inventory.md) ·
@@ -21,6 +21,9 @@ on the fork kenesparta/rust-edu.github.io) · **Research:**
 | Build | One Docker image for laptops and CI; plain `cargo` works too |
 | Hosting | GitHub Pages, published by GitHub's own actions pinned by commit SHA |
 | Transition | Zola keeps deploying until step 8 through `shalzz/zola-deploy-action` pinned by SHA, the one temporary exception to GitHub-only actions; every step is a small PR that leaves the site working |
+| Workflow | Every step is a reviewed PR into `main` of the fork kenesparta/rust-edu.github.io; the finished work goes upstream as one PR from the fork's `main` to upstream `main` |
+| Resources page | A Markdown list (decision 1 below); the 3 empty subcategories go |
+| Zulip | The menu and the home page link to `/zulip/`, which redirects to `https://rust-edu.zulip.cs.pdx.edu` |
 
 ## Editing with only Markdown
 
@@ -51,24 +54,26 @@ Plain **Markdown**: headings, lists, quotes, [links](https://www.rust-lang.org/)
 
 ## Steps
 
-One branch and one PR per step, from upstream `main`, named `<type>/<kebab-description>` with Conventional Commit
+One branch and one PR per step, from the fork's `main`, named `<type>/<kebab-description>` with Conventional Commit
 types (for example `fix/pin-zola-deploy-action`). Each PR has one concern, keeps the site building and deploying, and
 stays near 500 changed lines (600 at most), not counting content moves and deletions; bigger steps split as noted.
+Each PR merges into the fork's `main` after review; the upstream PR comes after step 8 is rehearsed on the fork.
 
 **Part A — on Zola, useful on its own**
 
-0. `docs/markdown-site-plan` — this plan and `research/`, opened upstream after step 1 merges (until then every PR
-   build fails). *Done when:* approved; upstream's agreement to Part B gates step 4, not Part A.
-1. `fix/pin-zola-deploy-action` (~7 lines) — pin `shalzz/zola-deploy-action` to v0.22.1 (`74526e6`) and
-   `actions/checkout` to v7.0.1 by commit SHA; the README names Zola 0.22.1 for local builds. `@master` now installs
-   Zola 0.23.6, which stops at `templates/macros.html:1` (`Unknown tag`), so every PR build and the next deploy fail.
-   *Done when:* the PR build and the deploy that follows the merge are green.
+0. `docs/markdown-site-plan` — this plan and `research/`. *Done when:* merged into the fork's `main` after step 1.
+1. *Done (fork PR #2).* `fix/pin-zola-deploy-action` (~7 lines) — pin `shalzz/zola-deploy-action` to v0.22.1
+   (`74526e6`) and `actions/checkout` to v7.0.1 by commit SHA, with per-job token permissions; the README names Zola
+   0.22.1 for local builds. `@master` now installs Zola 0.23.6, which stops at `templates/macros.html:1`
+   (`Unknown tag`), so every PR build and the next deploy fail. *Done when:* the PR build and the deploy that follows
+   the merge are green.
 2. `refactor/markdown-only-content` (~250, mostly moves) — YAML headers in all 11 files; the resources page becomes a
-   Markdown list (the 3-level TOML data, `resources.html` and `macros.html` go; open PRs #3 and #9 add entries there,
-   so upstream merges or closes them first, or this PR ports them with credit); remove the 4 raw-HTML lines; fix 3
-   broken links (as root-relative URLs) and an `email:` link; news sorted newest first; `/zulip/` via `redirect_to`,
-   with `content/zulip.md` moved to `content/zulip/_index.md` (Zola ignores the key on a page); kebab-case file names
-   (URLs unchanged); add `docs/editing.md`. *Done when:* Zola builds; the 11 page URLs are unchanged, `/zulip/` still
+   Markdown list (the 3-level TOML data, `resources.html` and `macros.html` go; the 3 empty subcategories go; the
+   entries of upstream PRs #3 and #9 are ported with `Co-authored-by` credit, and the upstream PR notes that it
+   supersedes them); remove the 4 raw-HTML lines; fix 3 broken links (as root-relative URLs) and an `email:` link;
+   news sorted newest first; `/zulip/` via `redirect_to`, with `content/zulip.md` moved to `content/zulip/_index.md`
+   (Zola ignores the key on a page), and the menu and home page linking there; kebab-case file names (URLs
+   unchanged); add `docs/editing.md`. *Done when:* Zola builds; the 11 page URLs are unchanged, `/zulip/` still
    redirects, `/news/` lists the posts newest first and bylines still show; `content/` has no HTML tags; the PR shows
    before/after screenshots of `/`, `/news/` and `/resources/`.
 3. `refactor/plain-css` (~600 + deletions) — one hand-written `static/style.css` at the same URL (≤ 50 KB; today
@@ -78,7 +83,7 @@ stays near 500 changed lines (600 at most), not counting content moves and delet
    keys); README without the submodule step. *Done when:* a fresh clone builds with no submodule step; the PR shows
    before/after screenshots.
 
-**Part B — our generator, built next to Zola and not deployed yet** (starts once upstream agrees; see Risks)
+**Part B — our generator, built next to Zola and not deployed yet**
 
 Code follows our Rust rules (no `unwrap`, `expect` or `panic!` on input paths, no `mod.rs`, the workspace lints of
 research 0002 §1) with two std-only exceptions: hand-written error enums instead of `thiserror`/`anyhow`, and a seeded
@@ -109,17 +114,19 @@ PRs; research 0002 §9 sizes a broader subset at ~4,650.
 **Part C — switch over**
 
 8. `ci/pages-deploy` (~200 + deletions, two PRs) — `deploy.yml` on GitHub's Pages actions, building in Docker and
-   rehearsed on the fork; an upstream admin sets Settings → Pages → Source to *GitHub Actions* (checklist in the PR)
-   and, in the same sitting, merges the second PR, which deletes `config.toml`, `templates/` and `main.yml` (merges in
-   between do not publish); the README and `docs/editing.md` switch from Zola to `docker compose up` and `edu build`,
-   with the badge on the new workflow; Dependabot for `github-actions`, and for `docker` plus `rust-toolchain` in one
-   multi-ecosystem group, so a Rust release bumps the image and `rust-toolchain.toml` in one PR. *Done when:*
-   rust-edu.org serves the new build. Rollback: revert and flip the source back; `gh-pages` stays for two weeks.
+   rehearsed on the fork's own Pages site (with `--base-url`); the second PR deletes `config.toml`, `templates/` and
+   `main.yml`; the README and `docs/editing.md` switch from Zola to `docker compose up` and `edu build`, with the badge
+   on the new workflow; Dependabot for `github-actions`, and for `docker` plus `rust-toolchain` in one
+   multi-ecosystem group, so a Rust release bumps the image and `rust-toolchain.toml` in one PR. *Done when:* the
+   fork's Pages site serves the new build.
+9. **The upstream PR** — the fork's `main` to upstream `main`; an upstream admin sets Settings → Pages → Source to
+   *GitHub Actions* (checklist in the PR) and merges it in the same sitting. *Done when:* rust-edu.org serves the new
+   build. Rollback: revert and flip the source back; `gh-pages` stays for two weeks.
 
 ## Decisions for review (default first)
 
-1. Resources page: **a Markdown list** (anchors and GitHub preview for free), or keep structured YAML data (nested
-   lists in the header plus a dedicated template).
+1. *Decided 2026-10-28: a Markdown list.* Resources page: **a Markdown list** (anchors and GitHub preview for free),
+   or keep structured YAML data (nested lists in the header plus a dedicated template).
 2. Link color: **brand green `#0b7261`** (today's `$green`; 5.84:1 on white), or darker blue `#276f94` (5.54:1).
 3. JavaScript: **none** (the menu wraps on small screens), or a small disclosure menu.
 4. Smart quotes: **dropped** (about 12 lines render as typed once resources are Markdown), or implemented (~60 lines).
@@ -134,11 +141,11 @@ posts, and external link checks (std has no TLS).
 
 ## Risks
 
-- **Upstream may not want a custom generator.** Part A stands on its own; step 4 starts only after upstream's yes on
-  step 0.
+- **Upstream may not want a custom generator.** Everything is built and rehearsed on the fork first, so upstream
+  reviews a working result; Part A stands on its own and can go upstream alone if Part B is declined.
 - **Parser bugs.** Strict subsets: unsupported input is an error, never a guess; golden tests use real content and are
   diffed against Zola's output.
 - **Maintenance and bus factor.** Four small crates, a README that documents build, check and serve, tests as the
   spec; no dependency updates ever, only action pins, the base image and the Rust toolchain (bumped together).
-- **The Pages flip needs an admin.** Name that admin at step 0; if nobody agrees by step 4, decision 7 takes the
+- **The Pages flip needs an admin.** Name that admin before step 9; if nobody agrees, decision 7 takes the
   `gh-pages` push (no settings change).
