@@ -1,123 +1,48 @@
-+++
-title = "Resources"
-template = "resources.html"
+---
+title: Resources
+---
 
-[[extra.categories]]
-title = "Books"
+This page is currently a work-in-progress, but will eventually be home to a sizable, well-curated set of Rust education resources for educators and students alike.
+If you would like to contribute to this list, please [open a pull request](https://github.com/rust-edu/rust-edu.github.io/edit/main/content/resources/_index.md)!
 
-  [[extra.categories.resources]]
-  title = "The Rust Programming Language"
-  author = "Steve Klabnik and Carol Nichols"
-  url = "https://doc.rust-lang.org/book/"
-  description = "The official Rust programming book."
+## Books
 
-  [[extra.categories.resources]]
-  title = "Programming Rust"
-  author = "Jim Blandy, Jason Orendorff, and Leanora F. S. Tindall"
-  url = "https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/"
-  description = "Comprehensive Rust textbook with an emphasis on systems programming."
+- [The Rust Programming Language](https://doc.rust-lang.org/book/) — Steve Klabnik and Carol Nichols. The official Rust programming book.
+- [Programming Rust](https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/) — Jim Blandy, Jason Orendorff, and Leanora F. S. Tindall. Comprehensive Rust textbook with an emphasis on systems programming.
 
-[[extra.categories]]
-title = "Exercises"
+## Exercises
 
-  [[extra.categories.resources]]
-  title = "Rustlings"
-  url = "https://github.com/rust-lang/rustlings/"
-  description = "Collection of Rust exercises to be worked through on a user's local machine."
+- [Rustlings](https://github.com/rust-lang/rustlings/) — Collection of Rust exercises to be worked through on a user's local machine.
 
-[[extra.categories]]
-title = "Examples"
+## Examples
 
-  [[extra.categories.resources]]
-  title = "Rust By Example"
-  url = "https://doc.rust-lang.org/rust-by-example/"
-  description = "Collection of Rust code snippets which exemplify various Rust programming concepts."
+- [Rust By Example](https://doc.rust-lang.org/rust-by-example/) — Collection of Rust code snippets which exemplify various Rust programming concepts.
 
-[[extra.categories]]
-title = "Teaching and Training"
+## Teaching and Training
 
-  [[extra.categories.resources]]
-  title = "Comprehensive Rust 🦀"
-  url = "https://google.github.io/comprehensive-rust/"
-  description = "A 3-day course on Rust, covering everything from basic syntax to more advanced topics such as generics, error handling, and unsafe Rust. Also includes 'deep-dive' content on Chromium, Bare-metal and Concurrency."
+- [Comprehensive Rust 🦀](https://google.github.io/comprehensive-rust/) — A 3-day course on Rust, covering everything from basic syntax to more advanced topics such as generics, error handling, and unsafe Rust. Also includes 'deep-dive' content on Chromium, Bare-metal and Concurrency.
+- [Rust 101 (Tweede Golf)](https://github.com/tweedegolf/101-rs/) — Modular course materials for teaching Rust. Organized as four tracks: Rust Language Introduction, Rust for the Web, Rust for Systems Programming, Scientific Rust.
+- [Rust 101 (Ralf Jung)](https://github.com/RalfJung/rust-101) — This course covers core Rust in detail, including advanced concepts.
 
-  [[extra.categories.resources]]
-  title = "Rust 101 (Tweede Golf)"
-  url = "https://github.com/tweedegolf/101-rs/"
-  description = "Modular course materials for teaching Rust.  Organized as four tracks: Rust Language Introduction, Rust for the Web, Rust for Systems Programming, Scientific Rust."
+## Collected learning materials
 
-  [[extra.categories.resources]]
-  title = "Rust 101 (Ralf Jung)"
-  url = "https://github.com/RalfJung/rust-101"
-  description = "This course covers core Rust in detail, including advanced concepts."
+- [rust-learning](https://github.com/ctjhoa/rust-learning) — This is a curated collection of Rust blog posts, videos, etc focused on learning Rust.
 
-[[extra.categories]]
-title = "Collected learning materials"
+## By topic
 
-  [[extra.categories.resources]]
-  title = "rust-learning"
-  url = "https://github.com/ctjhoa/rust-learning"
-  description = "This is a curated collection of Rust blog posts, videos, etc focused on learning Rust."
+### Asynchronous
 
-[[extra.categories]]
-title = "By topic"
+- [Asynchronous Programming in Rust](https://rust-lang.github.io/async-book/) — Comprehensive, up-to-date guide to using Rust's async language features and libraries.
+- [Comprehensive Rust 🦀: Concurrency](https://google.github.io/comprehensive-rust/concurrency.html) — A full-day course covering thread-based and async/await-based concurrency.
 
-  [[extra.categories.subcategories]]
-  title = "Asynchronous"
+### Embedded
 
-    [[extra.categories.subcategories.resources]]
-    title = "Asynchronous Programming in Rust"
-    url = "https://rust-lang.github.io/async-book/"
-    description = "Comprehensive, up-to-date guide to using Rust's async language features and libraries."
+- [The Embedded Rust Book](https://docs.rust-embedded.org/book/) — Introductory book about using the Rust Programming Language on Bare Metal embedded systems, such as Microcontrollers.
+- [Comprehensive Rust 🦀: Bare Metal](https://google.github.io/comprehensive-rust/bare-metal.html) — A full-day course on using Rust for embedded development in a `no_std` environment. Covers both microcontrollers and application processors.
+- [Awesome Embedded Rust](https://github.com/rust-embedded/awesome-embedded-rust) — Curated list of resources related to embedded and low-level programming in the programming language Rust.
+- [The Rust on ESP Book](https://esp-rs.github.io/book/) — Comprehensive guide on using Rust with Espressif SoCs and modules.
+- [Embedded Rust on Espressif](https://esp-rs.github.io/std-training) — Training Material for learning to use Embedded Rust with the Espressif ESP32-C3.
 
-    [[extra.categories.subcategories.resources]]
-    title = "Comprehensive Rust 🦀: Concurrency"
-    url = "https://google.github.io/comprehensive-rust/concurrency.html"
-    description = "A full-day course covering thread-based and async/await-based concurrency."
+### Unsafe
 
-  [[extra.categories.subcategories]]
-  title = "Embedded"
-
-    [[extra.categories.subcategories.resources]]
-    title = "The Embedded Rust Book"
-    url = "https://docs.rust-embedded.org/book/"
-    description = "Introductory book about using the Rust Programming Language on Bare Metal embedded systems, such as Microcontrollers."
-
-    [[extra.categories.subcategories.resources]]
-    title = "Comprehensive Rust 🦀: Bare Metal"
-    url = "https://google.github.io/comprehensive-rust/bare-metal.html"
-    description = "A full-day course on using Rust for embedded development in a `no_std` environment. Covers both microcontrollers and application processors."
-
-    [[extra.categories.subcategories.resources]]
-    title = "Awesome Embedded Rust"
-    url = "https://github.com/rust-embedded/awesome-embedded-rust"
-    description = "Curated list of resources related to embedded and low-level programming in the programming language Rust."
-
-    [[extra.categories.subcategories.resources]]
-    title = "The Rust on ESP Book"
-    url = "https://esp-rs.github.io/book/"
-    description = "Comprehensive guide on using Rust with Espressif SoCs and modules."
-
-    [[extra.categories.subcategories.resources]]
-    title = "Embedded Rust on Espressif"
-    url = "https://esp-rs.github.io/std-training"
-    description = "Training Material for learning to use Embedded Rust with the Espressif ESP32-C3."
-
-  [[extra.categories.subcategories]]
-  title = "Macros"
-
-  [[extra.categories.subcategories]]
-  title = "Networking"
-
-  [[extra.categories.subcategories]]
-  title = "Unsafe"
-
-    [[extra.categories.subcategories.resources]]
-    title = "The Rustonomicon"
-    url = "https://doc.rust-lang.org/nomicon/"
-    description = "The Rustonomicon digs into all the awful details that you need to understand when writing Unsafe Rust programs."
-
-  [[extra.categories.subcategories]]
-  title = "Web"
-
-+++
+- [The Rustonomicon](https://doc.rust-lang.org/nomicon/) — The Rustonomicon digs into all the awful details that you need to understand when writing Unsafe Rust programs.
