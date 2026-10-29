@@ -3,8 +3,8 @@ base_url = "https://rust-edu.org"
 title = "Rust Edu"
 description = "Rust education in academia (and beyond)"
 
-# Whether to automatically compile all Sass files in the sass directory
-compile_sass = true
+# The stylesheet is plain CSS: static/style.css
+compile_sass = false
 
 [markdown]
 # Curl straight quotes and apostrophes
