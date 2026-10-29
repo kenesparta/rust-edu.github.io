@@ -9,8 +9,7 @@ Rust Edu is an organization dedicated to supporting Rust education in the academ
 To contribute or run this website locally, follow the steps below.
 
 ### ✅ Requirements
-- [Rust](https://www.rust-lang.org/tools/install) installed
-- Zola (`cargo install zola`) installed
+- Zola **0.22.1** installed (newer releases, such as the one Homebrew installs, fail with `Unknown tag`)
 
 ## 📦 Installation Steps
 ### 1. Clone the Repository
@@ -19,12 +18,12 @@ git clone https://github.com/rust-edu/rust-edu.github.io.git
 cd rust-edu.github.io
 ```
 
-### 2. Install Zola
-Install Zola using Cargo:
-``` bash
-cargo install zola
+### 2. Install Zola 0.22.1
+Download the binary for your system from [Zola 0.22.1](https://github.com/getzola/zola/releases/tag/v0.22.1),
+or, with [Rust](https://www.rust-lang.org/tools/install) installed, build it with Cargo:
+```bash
+cargo install --locked --git https://github.com/getzola/zola --tag v0.22.1 zola
 ```
-If that fails, download a binary from [Zola Releases](https://github.com/getzola/zola/releases).
 
 ### 3. Initialize Submodules
 To load the external CSS themes (Bulma & Bulmaswatch):
