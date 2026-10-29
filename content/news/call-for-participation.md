@@ -7,7 +7,7 @@ authors:
 ---
 
 
-# A New Chapter for Rust-Edu
+## A New Chapter for Rust-Edu
 
 We are making a fresh start on **Rust-Edu** <https://rust-edu.org>.
 

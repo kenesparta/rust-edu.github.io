@@ -32,7 +32,7 @@ take on:
     easier. We believe that the notorious difficult learning curve of
     the language can be overcome with better tooling for education.
 
--   **Make Rust More Developer Friendly** — We want to provide feedback
+*   **Make Rust More Developer Friendly** — We want to provide feedback
     to the Rust Project itself, helping to make Rust a more learnable
     language for developers. We would like to identify places where we
     can help with syntax, tooling, documentation, exercises,

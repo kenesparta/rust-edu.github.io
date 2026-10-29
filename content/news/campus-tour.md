@@ -57,7 +57,7 @@ The event highlighted the growing appetite for Rust across Africa and showcased 
 
 PROMOTIC, an educational institution focused on producing industry-ready developers, is boldly championing Rust education in **Francophone Africa**. Backed by our partnership, they launched the [**PROMOTIC | Rust Developer Group**](https://promotic-edu.org/2025/02/07/promotic-integre-la-rust-foundation-un-pas-decisif-vers-lexcellence-technologique-en-afrique-de-louest/); an initiative aimed at bringing together developers passionate about Rust, not only in **Togo**, but across Africa.This group serves as a platform for Sharing knowledge, Organizing workshops, Collaborating on open-source projects. Since becoming an [associate member of the Rust Foundation](https://rustfoundation.org/media/rust-foundation-member-announcement-codeday-opensource-scienceos-sci-promotic/), PROMOTIC has made relentless efforts to integrate Rust into their curriculum. They describe this partnership as a natural extension of a strategy focused on technological excellence.
 
-> _“Adopting Rust in our curriculum reflects our commitment to training young people in the languages ​​of tomorrow. This gives them a competitive edge in the job market.”_  
+> _“Adopting Rust in our curriculum reflects our commitment to training young people in the languages of tomorrow. This gives them a competitive edge in the job market.”_  
 > — **DEGBE Komlan André**, Senior Developer and Education Manager at PROMOTIC
 
 > _“We have always sought to align our activities with the most advanced technologies. Rust, through its efficiency and security, allows us to meet the technical challenges of tomorrow.”_  
