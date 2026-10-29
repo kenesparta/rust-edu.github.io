@@ -9,6 +9,7 @@ If you would like to contribute to this list, please [open a pull request](https
 
 - [The Rust Programming Language](https://doc.rust-lang.org/book/) — Steve Klabnik and Carol Nichols. The official Rust programming book.
 - [Programming Rust](https://www.oreilly.com/library/view/programming-rust-2nd/9781492052586/) — Jim Blandy, Jason Orendorff, and Leanora F. S. Tindall. Comprehensive Rust textbook with an emphasis on systems programming.
+- [The Rust way of programming （Rust 编程之道）](https://item.jd.com/12479415.html) — Handong Zhang (张汉东). A Chinese Rust programming book. Helps Rust learners build a comprehensive Rust knowledge architecture.
 
 ## Exercises
 
