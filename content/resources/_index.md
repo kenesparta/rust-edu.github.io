@@ -24,6 +24,7 @@ If you would like to contribute to this list, please [open a pull request](https
 - [Comprehensive Rust 🦀](https://google.github.io/comprehensive-rust/) — A 3-day course on Rust, covering everything from basic syntax to more advanced topics such as generics, error handling, and unsafe Rust. Also includes 'deep-dive' content on Chromium, Bare-metal and Concurrency.
 - [Rust 101 (Tweede Golf)](https://github.com/tweedegolf/101-rs/) — Modular course materials for teaching Rust. Organized as four tracks: Rust Language Introduction, Rust for the Web, Rust for Systems Programming, Scientific Rust.
 - [Rust 101 (Ralf Jung)](https://github.com/RalfJung/rust-101) — This course covers core Rust in detail, including advanced concepts.
+- [Embedded Rust 101 (Wyliodrin & Politehnica Bucharest)](https://embedded-rust-101.wyliodrin.com) — The embedded systems course delivered in Rust using the Raspberry Pi Pico 2 at the Politehnica University of Bucharest.
 
 ## Collected learning materials
 
