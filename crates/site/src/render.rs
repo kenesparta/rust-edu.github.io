@@ -12,15 +12,20 @@ use edu_yaml::{Entry, Node};
 use crate::Error;
 use crate::build::BaseUrl;
 use crate::check::{ContentError, PageError, ValueError, read, refuse_symlink};
-use crate::page::{Kind, Order, Page, TOP};
+use crate::page::{self, Kind, Order, Page, TOP};
 
 /// The layout that wraps every page's own layout, at `{{ content | safe }}`.
 const LAYOUT: &str = "layout.html";
 
-/// The settings of `site.yaml`: the value `site` of the layouts, and the site's address.
+/// The settings of `site.yaml`: the value `site` of the layouts, the site's address, the address
+/// that `site.yaml` itself gives, which names the feed and its posts at any address, and the
+/// site's `title` and `description`.
 pub(crate) struct Site {
     pub(crate) value: Value,
     pub(crate) base_url: BaseUrl,
+    pub(crate) id_base: BaseUrl,
+    pub(crate) title: Option<String>,
+    pub(crate) description: Option<String>,
 }
 
 /// The settings of `site.yaml` in `root`, with `base_url` in place of their own if given, or
@@ -51,14 +56,29 @@ fn settings(text: &str, base_url: Option<&BaseUrl>) -> Result<Site, PageError> {
         edu_yaml::Value::Str(text) => BaseUrl::parse(text),
         edu_yaml::Value::List(_) | edu_yaml::Value::Map(_) => None,
     };
-    let own = own.ok_or(PageError::Value(entry.value.pos, ValueError::BadBaseUrl))?;
-    let base_url = base_url.cloned().unwrap_or(own);
+    let id_base = own.ok_or(PageError::Value(entry.value.pos, ValueError::BadBaseUrl))?;
+    let base_url = base_url.cloned().unwrap_or_else(|| id_base.clone());
     let values = entries.iter().map(|entry| match entry.key.as_str() {
         "base_url" => (entry.key.clone(), Value::Str(base_url.to_string())),
         _ => (entry.key.clone(), value(&entry.value)),
     });
     let value = Value::Map(values.collect());
-    Ok(Site { value, base_url })
+    let text = |key: &str| {
+        let text = entries
+            .iter()
+            .find(|entry| entry.key == key)
+            .map(page::text);
+        let text = text.transpose().map(|text| text.map(str::to_owned));
+        text.map_err(|(pos, error)| PageError::Value(pos, error))
+    };
+    let (title, description) = (text("title")?, text("description")?);
+    Ok(Site {
+        value,
+        base_url,
+        id_base,
+        title,
+        description,
+    })
 }
 
 fn map(entries: &[Entry]) -> Value {
