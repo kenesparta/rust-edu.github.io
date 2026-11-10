@@ -2,7 +2,7 @@
 title: "Rust Education Workshop: Code of Conduct"
 ---
 
-The Rust Education Workshop is intended to be an inclusive,
+The Rust Education [Workshop](/workshop/no-such-page/) is intended to be an inclusive,
 welcoming workshop for everyone. In particular, we do not
 tolerate harassment of workshop participants in any form.
 Workshop participants violating these rules may be
