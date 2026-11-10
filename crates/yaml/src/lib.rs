@@ -142,7 +142,7 @@ fn parse_lines<'a>(
 
 #[derive(Clone, Copy)]
 struct Line<'a> {
-    number: usize,
+        number: usize,
     /// The whole line without trailing spaces; columns count from its start.
     text: &'a str,
     /// The end of `text` left to parse: after the indentation, or after the `- ` of a list item
