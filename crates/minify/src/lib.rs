@@ -8,10 +8,21 @@
 //! name, number, color or quote. What would make it guess (a comment or a string that does not
 //! close, a `\` outside a string, a `url(` without quotes, `@charset`, a byte order mark after the
 //! start) is an error with a line and column; [`ErrorKind`] lists them.
+//!
+//! [`Markup`] writes the markup of a layout, which comes in runs between the layout's template
+//! tags, with each run of white space that holds a line break as one line break, in text between
+//! tags and between the attributes of a tag. The values of attributes stay as written. The scan
+//! knows a tag and a value in double quotes. What would make it guess is an error here too: an
+//! HTML comment, a `<` that starts no tag, a value that is not in double quotes and a tag that
+//! does not close; and for now `pre` and each element whose text is no markup, such as `script`
+//! and `title`, which the scan does not read yet.
 
 mod css;
+mod markup;
 
 use std::fmt;
+
+pub use markup::Markup;
 
 /// A line and a column, both counted from 1; columns count characters, not bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +60,19 @@ pub enum ErrorKind {
     /// very first bytes, so that the comment or the empty line removed before it would switch it
     /// on, and with another encoding than UTF-8 a browser would not read what the scan reads.
     Charset,
+    /// `<!--` in the text of a layout, where it starts a comment, which the page would publish.
+    HtmlComment,
+    /// A `<` in the text of a layout that starts no tag: neither a letter, `/` and a letter, nor
+    /// `!DOCTYPE html>` in any letter case follows it. An HTML parser would guess what it is.
+    LessThan,
+    /// An attribute in a layout that is not written `name="value"`: a value in single quotes or
+    /// in none, or a `=` that does not stand right between the name and the first quote.
+    UnquotedValue,
+    /// A tag in a layout without its `>` before the next `<` or before the end of the layout.
+    UnclosedTag,
+    /// The start tag in a layout of `pre`, or of an element whose text is no markup, such as
+    /// `script` or `title`: the scan does not read them yet.
+    UnreadElement,
 }
 
 /// `text`, a stylesheet, as the site publishes it: each line without its comments and without the
@@ -111,6 +135,26 @@ impl fmt::Display for ErrorKind {
             Self::Charset => {
                 "`@charset` is not supported; delete it, since the site serves a stylesheet as \
                  UTF-8"
+            }
+            Self::HtmlComment => {
+                "`<!--` starts an HTML comment, which a page would publish; write a comment as \
+                 `{# … #}`"
+            }
+            Self::LessThan => {
+                "this `<` starts no tag, end tag or `<!DOCTYPE html>`; write `&lt;` for the \
+                 character"
+            }
+            Self::UnquotedValue => {
+                "an attribute is written as `name=\"value\"`; put its value in double quotes, \
+                 with no space around the `=`"
+            }
+            Self::UnclosedTag => {
+                "no `>` closes this tag; close it and each of its values, or write `&lt;` for a \
+                 `<` that starts no tag"
+            }
+            Self::UnreadElement => {
+                "the scan does not read `pre` yet, nor an element whose text is no markup, such \
+                 as `script` or `title`; take the element out of the layout"
             }
         })
     }

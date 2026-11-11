@@ -57,7 +57,7 @@ flowchart LR
         YAML["edu-yaml\nparse_front_matter & parse"]
         MARK["edu-markdown\nto_html (2-pass)"]
         TMPL["edu-template\nTemplate::parse, walk & render"]
-        MIN["edu-minify\ncss"]
+        MIN["edu-minify\ncss & Markup"]
         SITE["edu-site (edu CLI)\ncheck, build, serve"]
     end
 
@@ -102,7 +102,11 @@ flowchart LR
     a stylesheet without its comments, without the blanks at the start and the end of each line, and without the lines
     left empty. It reads no rule or value, so every token stays as written; it keeps a comment that starts with `/*!`,
     and stops with a line and column at what would make it guess: a comment or a string that does not close, a `\`
-    outside a string, a `url(` without quotes, `@charset`, or a byte order mark after the start.
+    outside a string, a `url(` without quotes, `@charset`, or a byte order mark after the start. `Markup` writes a
+    layout's own text, run by run between its template tags, with one line break for each run of white space that
+    has one, between tags and between the attributes of a tag; the values of attributes stay as written. It stops
+    at an HTML comment, a `<` that starts no tag, a value that is not in double quotes and a tag that does not
+    close, and for now at `pre` and at each element whose text is no markup, such as `script`.
   - `crates/site` (`edu-site`, binary `edu`) — the command-line tool. `edu check` checks `site.yaml`, the layouts in
     `layouts/`, and the YAML header and Markdown text of every page in `content/`, renders every page with them,
     and follows every link between the pages and files of the site and each address of `urls.txt`, the addresses
