@@ -28,7 +28,7 @@ weaken a check or a test to make it pass.
 |---|---|
 | `content/` | The pages, one Markdown file each, and the files they link to, such as PDFs |
 | `layouts/` | The HTML layout of each kind of page |
-| `static/` | `style.css` and the images |
+| `static/` | `style.css`, which the build publishes without its comments, and the images |
 | `site.yaml` | The site's address, title and description, and the menu, next-step (`hero`) and footer links |
 | `urls.txt` | The addresses that other sites may link to |
 | `crates/` | The generator: `yaml`, `markdown`, `template`, `minify` and `site`, which has the `edu` binary |

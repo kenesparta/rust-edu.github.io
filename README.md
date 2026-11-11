@@ -35,7 +35,8 @@ With Rust installed, `cargo run -p edu-site -- serve --drafts` does the same.
 ## 🎨 Layout and Style
 - `layouts/`: the HTML layout of each kind of page; `layout.html` also holds the two short scripts of the theme button,
   the site's only JavaScript (without it, the site follows the system's theme)
-- `static/style.css`: the whole stylesheet, plain CSS with its colors in token blocks at the top, light and dark
+- `static/style.css`: the whole stylesheet, plain CSS with its colors in token blocks at the top, light and dark; the
+  build publishes it without its comments and the blanks around its lines, so a comment costs a reader nothing
 - `site.yaml`: the site's address, title and description, and the menu, next-step (`hero`) and footer links
 
 ## 🦀 The Generator
@@ -49,12 +50,14 @@ flowchart LR
         MD["content/**/*.md"]
         SY["site.yaml"]
         LY["layouts/*.html"]
+        ST["*.css of static/ and content/"]
     end
 
     subgraph Crates["Rust Workspace (std only)"]
         YAML["edu-yaml\nparse_front_matter & parse"]
         MARK["edu-markdown\nto_html (2-pass)"]
         TMPL["edu-template\nTemplate::parse & render"]
+        MIN["edu-minify\ncss"]
         SITE["edu-site (edu CLI)\ncheck, build, serve"]
     end
 
@@ -62,9 +65,11 @@ flowchart LR
     MD -->|"Markdown body"| MARK
     SY --> YAML
     LY --> TMPL
+    ST --> MIN
     YAML --> SITE
     MARK --> SITE
     TMPL --> SITE
+    MIN --> SITE
     SITE --> OUT["Verified Content & HTML"]
 ```
 
@@ -77,7 +82,8 @@ flowchart LR
   one of `edu-minify` also holds each copy to the tokens of its source.
 - **Safe types of file:** Besides the pages, which have no HTML, `content/` and `static/` hold only images, PDF
   and text files, LaTeX files and stylesheets; an SVG image passes only without scripts, event attributes,
-  `javascript:` addresses or HTML.
+  `javascript:` addresses or HTML, and a stylesheet only as UTF-8 text whose comments and strings `edu-minify` can
+  follow.
 - **Only the site's own files:** The generator refuses symbolic links, which could bring files from outside the
   repository into the site, and leaves out files and folders whose names start with `.`, such as `.DS_Store`.
 - **Five crates under `crates/`:**
@@ -105,7 +111,8 @@ flowchart LR
     builds for the `base_url` of `site.yaml`, unless `--base-url` gives another, such as a fork's Pages site; the ids
     of the feeds' posts keep the `base_url` of `site.yaml`. `edu serve` builds the site in memory and serves it at
     http://127.0.0.1:1111 as GitHub Pages would, building it again on a request after a change, and showing the
-    errors, if any, instead of the page.
+    errors, if any, instead of the page. `edu build` writes each stylesheet as `edu-minify` gives it, and `edu serve`
+    serves the same bytes.
 
 ```mermaid
 flowchart LR

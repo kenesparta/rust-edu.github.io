@@ -1,0 +1,4 @@
+/* A stylesheet beside the pages, as a file of `content/`. */
+@media print {
+    nav { display: none }
+}

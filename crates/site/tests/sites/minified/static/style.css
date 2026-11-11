@@ -1,0 +1,25 @@
+/*! The styles of a test site; the build keeps this notice. */
+
+/*
+ * The colors of the page.
+ */
+:root {
+    --paper: #fbf8f3; /* light */
+    --ink: #2a3439;
+}
+
+body {
+	background: var(--paper);
+	color: var(--ink);
+	font-family: "Noto  Sans", sans-serif;  
+}
+
+/* A comment in a string is text, and a comment between two tokens leaves its marks. */
+q::before {
+    content: "/* “ */";
+}
+
+.menu a,
+.menu/* any */.button {
+    margin: 0/* top */1rem;
+}

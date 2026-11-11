@@ -1,0 +1,4 @@
+q::before {
+    content: "It's a string
+              on two lines";
+}

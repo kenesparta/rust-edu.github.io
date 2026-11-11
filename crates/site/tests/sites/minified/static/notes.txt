@@ -1,0 +1,3 @@
+/* Not a stylesheet: the build copies this file as it is. */
+
+    body { }

@@ -24,6 +24,13 @@ Besides its pages, the site publishes images (`.png`, `.jpg`, `.jpeg`, `.gif`, `
 the scripts in it as part of the site. It also stops at an SVG image with a script, an attribute such as
 `onload`, a `javascript:` address or HTML in it, and at one not saved as UTF-8.
 
+The site publishes a stylesheet without its comments and without the blanks around its lines, so a comment in
+`static/style.css` costs a reader nothing; a comment that starts with `/*!` is published as written, for a notice that
+has to stay. No rule, name or value of the stylesheet changes. The automatic check stops, with its line and column, at a
+stylesheet not saved as UTF-8, at a comment or a string in it that does not close, and at four things that the site's
+stylesheet does not use, where the check could not be sure to read the stylesheet as a browser does: a `\` outside a
+string, a `url(` whose address is not in quotes, `@charset`, and a byte order mark that is not at the very start.
+
 The automatic check stops at a symbolic link, which could bring a file from outside the site into it. Files and
 folders whose names start with `.`, such as `.DS_Store`, are not part of the site.
 

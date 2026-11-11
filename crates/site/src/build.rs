@@ -1,6 +1,7 @@
 //! `edu build`: the site as files. Each page becomes `index.html` in the folder of its URL, the
 //! files of `static/` are copied to the top, and the other files of `content/` beside the pages of
-//! their folder; `404.html`, `robots.txt` and `sitemap.xml` go at the top, and the feeds `atom.xml`
+//! their folder, but for a stylesheet, which is written without its comments and the blanks around
+//! its lines; `404.html`, `robots.txt` and `sitemap.xml` go at the top, and the feeds `atom.xml`
 //! and `rss.xml` too when a section with `sort_by: date` and no `redirect_to` lists a live post. A
 //! preview has the drafts too, and works at another address.
 
@@ -94,6 +95,8 @@ pub(crate) enum Output {
     Page(PathBuf, String),
     /// A copy of the file of `content/` or `static/` at the path.
     Copy(PathBuf),
+    /// The stylesheet of `content/` or `static/` at the path, as `edu-minify` writes it.
+    Style(PathBuf, String),
     /// A file that the build makes itself: one of `MADE`, or a feed.
     Made(String),
 }
@@ -126,7 +129,7 @@ fn save(root: &Path, out: &Path, site: &Site) -> Result<(), Error> {
 /// The site in `root`, built with `options` in memory, as `edu build` writes it and `edu serve`
 /// serves it.
 pub(crate) fn plan(root: &Path, options: &Options) -> Result<Site, Error> {
-    let checked = check::pages(root, options)?;
+    let mut checked = check::pages(root, options)?;
     let base_url = &checked.base_url;
     // The texts of the files of `MADE`, in its order.
     let texts = [
@@ -153,7 +156,11 @@ pub(crate) fn plan(root: &Path, options: &Options) -> Result<Site, Error> {
     for (dir, sources) in [("content", &checked.files), ("static", &checked.statics)] {
         for file in sources {
             let path = file.strip_prefix(dir).unwrap_or(file).to_owned();
-            add(&mut files, path, file, Output::Copy(file.clone()))?;
+            let output = match checked.styles.remove(file) {
+                Some(css) => Output::Style(file.clone(), css),
+                None => Output::Copy(file.clone()),
+            };
+            add(&mut files, path, file, output)?;
         }
     }
     Ok(Site { files, pages })
@@ -209,7 +216,7 @@ fn add(
             files.insert(path, output);
             Ok(())
         }
-        Some(Output::Page(first, _) | Output::Copy(first)) => {
+        Some(Output::Page(first, _) | Output::Copy(first) | Output::Style(first, _)) => {
             let first = first.clone();
             Err(Error::Clash {
                 path,
@@ -246,7 +253,9 @@ fn write(root: &Path, dir: &Path, site: &Site) -> Result<(), Error> {
             fs::create_dir_all(parent).map_err(output_error(&to))?;
         }
         let written = match output {
-            Output::Page(_, text) | Output::Made(text) => fs::write(&full, text),
+            Output::Page(_, text) | Output::Style(_, text) | Output::Made(text) => {
+                fs::write(&full, text)
+            }
             Output::Copy(from) => fs::copy(root.join(from), &full).map(|_| ()),
         };
         written.map_err(output_error(&to))?;
@@ -322,12 +331,43 @@ mod tests {
         assert!(out.join(MARKER).is_file());
         let home = fs::read_to_string(out.join("index.html")).unwrap();
         assert!(home.starts_with("<title>Home - Test</title>\n"), "{home}");
-        let style = test_site("valid").join("static/style.css");
+        // An image is a copy of its file. A stylesheet no longer is: the build writes it smaller,
+        // as the site `minified` shows below.
+        let logo = test_site("valid").join("static/images/logo.svg");
         assert_eq!(
-            fs::read(out.join("style.css")).unwrap(),
-            fs::read(style).unwrap()
+            fs::read(out.join("images/logo.svg")).unwrap(),
+            fs::read(logo).unwrap()
         );
         assert!(!out.with_extension("tmp").exists());
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
+    fn a_stylesheet_is_written_without_its_comments_and_every_other_file_as_it_is() {
+        // `minified` holds a page, a stylesheet in `static/`, one beside the page whose extension
+        // is in capitals, and a text file that looks like a stylesheet.
+        let out = out("minified");
+        let built = site(&test_site("minified"), &out, &LIVE).unwrap();
+        assert_eq!((built.pages, built.files), (1, 6));
+        let read = |path| fs::read_to_string(out.join(path)).unwrap();
+        // Of the source, the notice stays, an empty comment stays where a comment alone parts two
+        // tokens, and the string keeps its two spaces and what looks like a comment.
+        let style = concat!(
+            "/*! The styles of a test site; the build keeps this notice. */\n",
+            ":root {\n--paper: #fbf8f3;\n--ink: #2a3439;\n}\n",
+            "body {\nbackground: var(--paper);\ncolor: var(--ink);\n",
+            "font-family: \"Noto  Sans\", sans-serif;\n}\n",
+            "q::before {\ncontent: \"/* \u{201c} */\";\n}\n",
+            ".menu a,\n.menu/**/.button {\nmargin: 0/**/1rem;\n}\n",
+        );
+        assert_eq!(read("style.css"), style);
+        let print = "@media print {\nnav { display: none }\n}\n";
+        assert_eq!(read("Print.CSS"), print);
+        let notes = test_site("minified").join("static/notes.txt");
+        assert_eq!(
+            fs::read(out.join("notes.txt")).unwrap(),
+            fs::read(notes).unwrap()
+        );
         fs::remove_dir_all(out).unwrap();
     }
 
@@ -674,14 +714,14 @@ mod tests {
 
     #[test]
     fn a_file_that_cannot_be_copied_is_an_error_and_leaves_no_output() {
-        // The plan of a site whose file `static/gone.css` went away before the copy.
+        // The plan of a site whose file `static/gone.txt` went away before the copy.
         let mut files = BTreeMap::new();
-        let (home, gone) = ("<p>Home</p>\n".to_owned(), PathBuf::from("static/gone.css"));
+        let (home, gone) = ("<p>Home</p>\n".to_owned(), PathBuf::from("static/gone.txt"));
         files.insert(PathBuf::from("index.html"), Output::Made(home));
-        files.insert(PathBuf::from("gone.css"), Output::Copy(gone));
+        files.insert(PathBuf::from("gone.txt"), Output::Copy(gone));
         let out = out("gone");
         let result = save(&test_site("valid"), &out, &Site { files, pages: 0 });
-        let is_gone = |path: &Path| path.ends_with("gone.css");
+        let is_gone = |path: &Path| path.ends_with("gone.txt");
         assert!(
             matches!(&result, Err(Error::Output { path, .. }) if is_gone(path)),
             "{result:?}"
@@ -701,5 +741,17 @@ mod tests {
         let expected = "static/robots.txt would be /robots.txt, which `edu build` writes itself";
         assert_eq!(error.to_string(), expected);
         assert!(!out.exists() && !out.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn two_stylesheets_for_one_url_clash_as_two_copies_do() {
+        let style = |source: &str| Output::Style(PathBuf::from(source), String::new());
+        let (first, second) = ("content/style.css", "static/style.css");
+        let mut files = BTreeMap::new();
+        let path = PathBuf::from("style.css");
+        add(&mut files, path.clone(), Path::new(first), style(first)).unwrap();
+        let error = add(&mut files, path, Path::new(second), style(second)).unwrap_err();
+        let expected = "content/style.css and static/style.css would both be /style.css";
+        assert_eq!(error.to_string(), expected);
     }
 }

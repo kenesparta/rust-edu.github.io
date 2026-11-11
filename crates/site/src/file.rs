@@ -1,14 +1,12 @@
-//! The files of `content/` and `static/` that are not pages, which the build copies as they are:
-//! only images, PDF and text files, LaTeX files and stylesheets. A browser runs the scripts of
-//! other types of file, such as HTML, as if they were pages of the site, and those of an SVG image
-//! opened on its own too, so the site publishes an SVG image only if the scan of `svg.rs` lets it
-//! through.
+//! The files of `content/` and `static/` that are not pages: only images, PDF and text files,
+//! LaTeX files and stylesheets. The build copies them as they are, but for a stylesheet, which it
+//! writes as `edu-minify` gives it, without its comments. A browser runs the scripts of other
+//! types of file, such as HTML, as if they were pages of the site, and those of an SVG image opened
+//! on its own too, so the site publishes an SVG image only if the scan of `svg.rs` lets it through.
 
 use std::fmt;
 use std::fs;
 use std::path::Path;
-
-use edu_yaml::Pos;
 
 use crate::Error;
 use crate::check::{ContentError, PageError};
@@ -33,43 +31,52 @@ pub enum FileError {
     Type(Option<String>),
     /// An SVG image that the scan refuses.
     Svg(SvgError),
+    /// A stylesheet that is not UTF-8, as the build reads it and as the site serves it.
+    NotUtf8,
 }
 
-/// Checks the file at `path`, relative to `root`, which the build would copy: its type, and the
-/// text of an SVG image. An error in the file goes to `errors`.
-pub(crate) fn check(root: &Path, path: &Path, errors: &mut Vec<ContentError>) -> Result<(), Error> {
+/// Checks the file at `path`, relative to `root`, which the build would publish: its type, and the
+/// text of an SVG image or of a stylesheet. An error in the file goes to `errors`; a stylesheet
+/// without one comes back as the build writes it.
+pub(crate) fn check(
+    root: &Path,
+    path: &Path,
+    errors: &mut Vec<ContentError>,
+) -> Result<Option<String>, Error> {
     if path == Path::new(CNAME) {
-        return Ok(());
+        return Ok(None);
     }
     let extension = path
         .extension()
         .map(|extension| extension.to_string_lossy().to_ascii_lowercase());
-    let (pos, error) = match extension.as_deref() {
-        Some("svg") => match svg(root, path)? {
-            Ok(()) => return Ok(()),
-            Err((pos, error)) => (pos, FileError::Svg(error)),
+    let error = match extension.as_deref() {
+        Some("svg") => match text(root, path)?.map(|text| svg::scan(&text)) {
+            Some(Ok(())) => return Ok(None),
+            Some(Err((pos, error))) => PageError::File(pos, FileError::Svg(error)),
+            None => PageError::File(TOP, FileError::Svg(SvgError::NotText)),
         },
-        Some(extension) if PUBLISHED.contains(&extension) => return Ok(()),
-        Some("htm" | "html" | "xhtml") => (TOP, FileError::Html),
-        _ => (TOP, FileError::Type(extension)),
+        Some("css") => match text(root, path)?.map(|text| edu_minify::css(&text)) {
+            Some(Ok(css)) => return Ok(Some(css)),
+            Some(Err(error)) => PageError::Style(error),
+            None => PageError::File(TOP, FileError::NotUtf8),
+        },
+        Some(extension) if PUBLISHED.contains(&extension) => return Ok(None),
+        Some("htm" | "html" | "xhtml") => PageError::File(TOP, FileError::Html),
+        _ => PageError::File(TOP, FileError::Type(extension)),
     };
     let path = path.to_owned();
-    let error = PageError::File(pos, error);
     errors.push(ContentError { path, error });
-    Ok(())
+    Ok(None)
 }
 
-/// The scan of the SVG image at `path`, relative to `root`.
-fn svg(root: &Path, path: &Path) -> Result<Result<(), (Pos, SvgError)>, Error> {
+/// The text of the file at `path`, relative to `root`, or `None` if the file is not UTF-8.
+fn text(root: &Path, path: &Path) -> Result<Option<String>, Error> {
     let read_error = |source| Error::Read {
         path: path.to_owned(),
         source,
     };
     let bytes = fs::read(root.join(path)).map_err(read_error)?;
-    Ok(match String::from_utf8(bytes) {
-        Ok(text) => svg::scan(&text),
-        Err(_) => Err((TOP, SvgError::NotText)),
-    })
+    Ok(String::from_utf8(bytes).ok())
 }
 
 impl fmt::Display for FileError {
@@ -96,6 +103,7 @@ impl fmt::Display for FileError {
                 f.write_str(" files")
             }
             Self::Svg(error) => error.fmt(f),
+            Self::NotUtf8 => f.write_str("a stylesheet is UTF-8 text; save it as UTF-8"),
         }
     }
 }

@@ -2,7 +2,8 @@
 //! values the site can use, its text is in the Markdown subset, the layouts of `layouts/` render
 //! it with the settings of `site.yaml`, and its links go to pages and files of the site, in the
 //! feeds' posts too; and the other files of `content/` and `static/` are of a type that the site
-//! publishes. `edu build` checks the same, and renders the pages and the feeds that it writes.
+//! publishes, a stylesheet among them one that the build can write without its comments.
+//! `edu build` checks the same, and renders the pages and the feeds that it writes.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -37,6 +38,9 @@ pub enum PageError {
     Text(edu_markdown::Error),
     /// An error in a layout's text.
     Layout(edu_template::Error),
+    /// An error in a stylesheet of `content/` or `static/`, which the build writes without its
+    /// comments.
+    Style(edu_minify::Error),
     /// An error in a layout while it renders `page`.
     Render {
         page: PathBuf,
@@ -102,8 +106,9 @@ pub enum ValueError {
 }
 
 /// What `edu check` checked: how many pages and layouts; and for the build, the pages it rendered,
-/// the files of `content/` that are not pages, the files of `static/`, the site's address, and the
-/// feed if a section with `sort_by: date` lists posts.
+/// the files of `content/` that are not pages, the files of `static/`, each stylesheet among them
+/// as the build writes it, by its path, the site's address, and the feed if a section with
+/// `sort_by: date` lists posts.
 #[derive(Debug)]
 pub(crate) struct Checked {
     pub(crate) pages: usize,
@@ -111,6 +116,7 @@ pub(crate) struct Checked {
     pub(crate) rendered: Vec<Rendered>,
     pub(crate) files: Vec<PathBuf>,
     pub(crate) statics: Vec<PathBuf>,
+    pub(crate) styles: BTreeMap<PathBuf, String>,
     pub(crate) base_url: BaseUrl,
     pub(crate) feed: Option<Feed>,
 }
@@ -151,8 +157,11 @@ pub(crate) fn pages(root: &Path, options: &Options) -> Result<Checked, Error> {
             }
         }
     }
+    let mut styles = BTreeMap::new();
     for path in files.iter().chain(&statics) {
-        file::check(root, path, &mut errors)?;
+        if let Some(css) = file::check(root, path, &mut errors)? {
+            styles.insert(path.clone(), css);
+        }
     }
     let site = render::site(root, options.base_url.as_ref(), &mut errors)?;
     let layouts = Layouts::read(root, &mut errors)?;
@@ -240,6 +249,7 @@ pub(crate) fn pages(root: &Path, options: &Options) -> Result<Checked, Error> {
             rendered,
             files,
             statics,
+            styles,
             base_url,
             feed,
         })
@@ -325,6 +335,7 @@ impl fmt::Display for ContentError {
             PageError::Value(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
             PageError::Text(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
             PageError::Layout(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
+            PageError::Style(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
             PageError::Link(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
             PageError::File(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
             PageError::Render { page, error } => {
@@ -568,6 +579,32 @@ mod tests {
              in the image; remove it"
                 .to_owned(),
             format!("static/sub/CNAME:1:1: error: {none}; {types}"),
+        ];
+        assert_eq!(errors, expected);
+    }
+
+    #[test]
+    fn a_stylesheet_that_the_build_cannot_write_smaller_is_an_error_where_the_trouble_starts() {
+        // `unminifiable` holds a stylesheet for each thing that stops the scan of `edu-minify`, and
+        // one in another encoding than UTF-8.
+        let (root, options) = site("unminifiable");
+        let Err(Error::Content(errors)) = pages(&root, &options) else {
+            panic!("expected content errors");
+        };
+        let errors: Vec<String> = errors.iter().map(ToString::to_string).collect();
+        let expected = [
+            "static/bom.css:2:1: error: U+FEFF is a byte order mark only at the start of a file, \
+             and part of a name here; delete it",
+            "static/charset.css:2:1: error: `@charset` is not supported; delete it, since the site \
+             serves a stylesheet as UTF-8",
+            "static/comment.css:2:3: error: this comment has no end; close it with `*/`",
+            "static/escape.css:1:4: error: a `\\` outside a string is not supported; write the \
+             character itself, or put the text in quotes",
+            "static/latin1.css:1:1: error: a stylesheet is UTF-8 text; save it as UTF-8",
+            "static/string.css:2:14: error: this string has no closing quote on its line; write it \
+             on one line",
+            "static/url.css:1:20: error: the address of this `url(` is not in quotes; write it as \
+             `url(\"/favicon.svg\")`",
         ];
         assert_eq!(errors, expected);
     }

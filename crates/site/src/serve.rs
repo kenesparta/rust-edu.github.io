@@ -203,7 +203,9 @@ fn not_found(site: &Site, root: &Path) -> Response {
 /// The bytes of the file `path` of `site`, if it has one that can be read.
 fn body(site: &Site, root: &Path, path: &str) -> Option<Vec<u8>> {
     match site.files.get(Path::new(path))? {
-        Output::Page(_, text) | Output::Made(text) => Some(text.clone().into_bytes()),
+        Output::Page(_, text) | Output::Style(_, text) | Output::Made(text) => {
+            Some(text.clone().into_bytes())
+        }
         Output::Copy(source) => fs::read(root.join(source)).ok(),
     }
 }
@@ -363,6 +365,25 @@ mod tests {
         assert_eq!(kind("images/A.PNG"), "image/png");
     }
 
+    #[test]
+    fn every_file_is_served_as_the_build_writes_it() {
+        // `minified` holds a page, two stylesheets, which the build writes smaller, and a text
+        // file, which it copies.
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sites/minified");
+        let out = std::env::temp_dir().join(format!("edu-serve-{}-written", std::process::id()));
+        let _ = fs::remove_dir_all(&out);
+        let _ = fs::remove_dir_all(out.with_extension("tmp"));
+        build::site(&root, &out, &LIVE).unwrap();
+        let site = build::plan(&root, &LIVE).unwrap();
+        assert_eq!(site.files.len(), 7);
+        for path in site.files.keys() {
+            let served = body(&site, &root, &path.to_string_lossy());
+            let written = fs::read(out.join(path)).ok();
+            assert!(served.is_some() && served == written, "{}", path.display());
+        }
+        fs::remove_dir_all(out).unwrap();
+    }
+
     /// Sends `request` to the server at `address`, and gives its whole response.
     fn send(address: std::net::SocketAddr, request: &str) -> String {
         let mut stream = TcpStream::connect(address).unwrap();
@@ -414,9 +435,21 @@ mod tests {
         assert!(get("/").contains("<p>Welcome again.</p>\n"));
         fs::write(root.join(layouts[1]), "<h2>{{ page.title }}</h2>\n").unwrap();
         assert!(get("/").contains("<h2>Home</h2>\n"));
+        // A stylesheet is served as the build writes it, without its comments, and a mistake in
+        // it stops the build as a mistake in a page does.
         fs::create_dir(root.join("static")).unwrap();
-        fs::write(root.join("static/new.css"), "a {}\n").unwrap();
-        assert!(get("/new.css").ends_with("\r\n\r\na {}\n"));
+        let style = root.join("static/new.css");
+        fs::write(&style, "/* New. */\na {\n    color: red;\n}\n").unwrap();
+        assert!(get("/new.css").ends_with("\r\n\r\na {\ncolor: red;\n}\n"));
+        fs::write(&style, "a {}\n/* open\n").unwrap();
+        let error = get("/new.css");
+        assert!(
+            error.starts_with("HTTP/1.1 500 Internal Server Error\r\n"),
+            "{error}"
+        );
+        let line = "static/new.css:2:1: error: this comment has no end; close it with `*/`\n";
+        assert!(error.contains(line), "{error}");
+        fs::remove_file(&style).unwrap();
         fs::write(&page, "---\ntitle: Home\n").unwrap();
         let error = get("/");
         assert!(

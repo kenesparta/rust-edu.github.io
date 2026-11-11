@@ -1,5 +1,7 @@
 /*
- * Rust Edu site styles: plain CSS, no framework and no build step.
+ * Rust Edu site styles: plain CSS and no framework. The build publishes this
+ * file without its comments and the blanks around its lines, and changes
+ * nothing else in it.
  *
  * Header, content and footer share one column, so they have one left edge.
  * Colors are only in the token blocks, as plain hex, which no browser can lose.
