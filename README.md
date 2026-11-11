@@ -104,9 +104,11 @@ flowchart LR
     and stops with a line and column at what would make it guess: a comment or a string that does not close, a `\`
     outside a string, a `url(` without quotes, `@charset`, or a byte order mark after the start. `Markup` writes a
     layout's own text, run by run between its template tags, with one line break for each run of white space that
-    has one, between tags and between the attributes of a tag; the values of attributes stay as written. It stops
-    at an HTML comment, a `<` that starts no tag, a value that is not in double quotes and a tag that does not
-    close, and for now at `pre` and at each element whose text is no markup, such as `script`.
+    has one: between tags, between the attributes of a tag, and in a script without a `type`, which keeps each of its
+    lines. The values of attributes and the text of `pre`, `textarea`, `title` and `style` stay as written. It stops
+    at an HTML comment, a `<` that starts no tag, a value that is not in double quotes, a tag or such an element that
+    does not close or that ends in `/>`, a `<` in such an element inside `svg`, and in a script at a backtick or a
+    `\` that ends a line.
   - `crates/site` (`edu-site`, binary `edu`) — the command-line tool. `edu check` checks `site.yaml`, the layouts in
     `layouts/`, and the YAML header and Markdown text of every page in `content/`, renders every page with them,
     and follows every link between the pages and files of the site and each address of `urls.txt`, the addresses

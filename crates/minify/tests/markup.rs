@@ -1,7 +1,10 @@
 //! The scan of a layout's markup through its public API: what each layout's own text is written
 //! as, and where each error points.
 
-use edu_minify::ErrorKind::{HtmlComment, LessThan, UnclosedTag, UnquotedValue, UnreadElement};
+use edu_minify::ErrorKind::{
+    Backtick, BrokenString, ForeignMarkup, HtmlComment, LessThan, SelfClosed, UnclosedElement,
+    UnclosedTag, UnquotedValue,
+};
 use edu_minify::{Error, ErrorKind, Markup, Pos};
 
 /// The pieces of `layout` in order: each comment of the template language, from `{#` to the first
@@ -123,6 +126,13 @@ fn white_space_between_the_parts_of_a_tag_is_written_alike_and_a_value_as_it_is(
             "<p title=\"1 < 2 > 0, 'x', =y, <!-- z -->\">",
         ),
         ("<br/>\n<br />\n<br\n/>", "<br/>\n<br />\n<br\n/>"),
+        // A `/` ends no start tag unless the `>` comes right after it.
+        ("<title/ >\n\n</title>", "<title/ >\n\n</title>"),
+        (
+            "<style / media=\"a/\">\n\n</style/>",
+            "<style / media=\"a/\">\n\n</style/>",
+        ),
+        ("<pre/>\n\n</pre/>\n\n", "<pre/>\n\n</pre/>\n"),
         (
             "<circle cx=\"1\"/>  <path d=\"M0 0\"\n  />",
             "<circle cx=\"1\"/>  <path d=\"M0 0\"\n/>",
@@ -145,6 +155,140 @@ fn white_space_between_the_parts_of_a_tag_is_written_alike_and_a_value_as_it_is(
 }
 
 #[test]
+fn what_is_in_pre_and_the_text_of_an_element_that_is_no_markup_stay_as_written() {
+    let kept = [
+        "<pre>\n  a  \n\n\tb\n</pre>",
+        "<pre class=\"a\"><code>\n\n  a\n</code>\n\n  <b\n  id=\"x\"\n>c</b\n >\n</pre>",
+        "<pre><pre>\n\n</pre>\n\n</pre>",
+        "<PRE>\n\n</Pre>",
+        "<textarea name=\"t\">\n\n  a  \n\n</textarea>",
+        "<title> A \n\n title </title>",
+        "<style>\n\n  a { b: c }\n\n  /* d */\n</style>",
+        "<iframe src=\"/x/\">\n\n</iframe>",
+        "<noscript>\n\n  <p>Without \n\n scripts.</p>\n</noscript>",
+        "<xmp>\n\n  <b>\n</xmp><listing>\n\n</listing><noembed>\n\n</noembed><noframes>\n\n</noframes>",
+        // No tag starts in such a text, and it ends at `</`, its name and white space, `/` or `>`.
+        "<title>a < b, <!-- c -->, <p\n\n>, </titles>, </ title>\n\n</TITLE\n>",
+        "<textarea>\n\n</textarea/>",
+        "<style>\n\n</stylesheet>\n\n</style\u{c}>",
+        "<svg><title>News \n\n feeds</title></svg>",
+    ];
+    for layout in kept {
+        assert_eq!(written(layout), layout);
+    }
+    let cases = [
+        (
+            "<pre>\n\n</pre>\n\n<p>\n\n</p>",
+            "<pre>\n\n</pre>\n<p>\n</p>",
+        ),
+        (
+            "<p>\n\n<pre\n\n>\n\n</pre\n\n>\n\n",
+            "<p>\n<pre\n>\n\n</pre\n\n>\n",
+        ),
+        (
+            "<pre>\n\n</pre></pre>\n\n<pre>\n\n</pre>",
+            "<pre>\n\n</pre></pre>\n<pre>\n\n</pre>",
+        ),
+        (
+            "<title>\n\n</title \n\n id=\"a\"\n\n>\n\n",
+            "<title>\n\n</title \nid=\"a\"\n>\n",
+        ),
+        (
+            "<textarea>\n\n</textarea>\n\n<p>",
+            "<textarea>\n\n</textarea>\n<p>",
+        ),
+        ("<title>1 <</title>\n\n<p>", "<title>1 <</title>\n<p>"),
+        // In `svg` and `math` such a text is as written too, and a script loses its blanks.
+        (
+            "<svg>\n\n<style>\n\n.a { b: c }\n</style><script>\n\n  d();\n</script></SVG>",
+            "<svg>\n<style>\n\n.a { b: c }\n</style><script>\nd();\n</script></SVG>",
+        ),
+        (
+            "<svg/><math></math><style>a < b\n\n</style>",
+            "<svg/><math></math><style>a < b\n\n</style>",
+        ),
+        // An end tag of such an element with no start tag before it is a tag like any other.
+        ("</title>\n\n</script>\n\n", "</title>\n</script>\n"),
+    ];
+    for (layout, expected) in cases {
+        assert_eq!(written(layout), expected, "{layout:?}");
+    }
+}
+
+#[test]
+fn a_script_keeps_each_line_break_between_two_lines_and_loses_the_blanks_around_them() {
+    let layout = concat!(
+        "<script>\n    try {\n        var theme = get(\"the  theme\");   \n\n",
+        "        if (a < b) {\r\n\t    b = /a  b/;\n        }\n    } catch (e) {}\n</script>\n",
+    );
+    let expected = concat!(
+        "<script>\ntry {\nvar theme = get(\"the  theme\");\n",
+        "if (a < b) {\nb = /a  b/;\n}\n} catch (e) {}\n</script>\n",
+    );
+    assert_eq!(written(layout), expected);
+    let cases = [
+        ("<script>a\n\n  b</script>", "<script>a\nb</script>"),
+        ("<script>  a  \n  </script>", "<script>  a\n</script>"),
+        (
+            "<script src=\"/a.js\">\n\n</script>",
+            "<script src=\"/a.js\">\n</script>",
+        ),
+        // Where a statement ends may hang on a line break, so one stays wherever one is.
+        (
+            "<script>return\n    a\n    ++\n    b</script>",
+            "<script>return\na\n++\nb</script>",
+        ),
+        (
+            "<script>// a  b\n\n  /* c\n     d */\n</script>",
+            "<script>// a  b\n/* c\nd */\n</script>",
+        ),
+        (
+            "<script>\n  --> a\n  b-->c\n</script>",
+            "<script>\n--> a\nb-->c\n</script>",
+        ),
+        // A `\` carries no line on unless a line feed ends the line.
+        (
+            "<script>a = \"\\\\\";\n  b = '\\n' \\ c</script>",
+            "<script>a = \"\\\\\";\nb = '\\n' \\ c</script>",
+        ),
+        (
+            "<script>a = \"b\\\r  c\";</script>",
+            "<script>a = \"b\\\r  c\";</script>",
+        ),
+        // The script ends where an HTML parser ends it, in a string too.
+        (
+            "<script>a = \"</script>\n\n\";",
+            "<script>a = \"</script>\n\";",
+        ),
+        (
+            "<script>\n\n</scripts>\n\n</SCRIPT\n\n>\n\n",
+            "<script>\n</scripts>\n</SCRIPT\n>\n",
+        ),
+        (
+            "<script>a <b && c <!-d\n\n</script>",
+            "<script>a <b && c <!-d\n</script>",
+        ),
+        (
+            "<SCRIPT DEFER data-type=\"a\">\n\n</SCRIPT>",
+            "<SCRIPT DEFER data-type=\"a\">\n</SCRIPT>",
+        ),
+    ];
+    for (layout, expected) in cases {
+        assert_eq!(written(layout), expected, "{layout:?}");
+    }
+    // A script with a `type` may be no JavaScript, and stays as written.
+    let kept = [
+        "<script type=\"module\">\n\n  a = `b\n\n  c`;\n</script>",
+        "<script type=\"application/ld+json\">\n\n  {\"a\":  \"b\\\n\"}\n</script>",
+        "<script async TYPE>\n\n</script>",
+        "<script\ntype=\"\">\n\n</script>",
+    ];
+    for layout in kept {
+        assert_eq!(written(layout), layout);
+    }
+}
+
+#[test]
 fn a_comment_of_the_template_parts_no_run_of_white_space() {
     let cases = [
         // Where a comment stood alone on its line, one line break is left.
@@ -153,10 +297,27 @@ fn a_comment_of_the_template_parts_no_run_of_white_space() {
             "<ul>\n{# The menu. #}<li>",
         ),
         ("a\n\n{# b #}\n{# c #}\n\nd", "a\n{# b #}{# c #}d"),
+        (
+            "<script>\n  {# a #}\n  b();\n\n  {# c #}\n</script>",
+            "<script>\n{# a #}b();\n{# c #}</script>",
+        ),
         ("<a\n  {# b #}\n  href=\"/\">", "<a\n{# b #}href=\"/\">"),
         // The blanks before a comment are written before the scan sees the line break after it.
         ("a  {# b #}  \n  c", "a  {# b #}\nc"),
         ("a  {# b #}  c", "a  {# b #}  c"),
+        // A comment in the middle of a name or of an end tag is not there for a browser.
+        (
+            "<p{# a #}re>\n\n</pr{# b #}e>\n\n",
+            "<p{# a #}re>\n\n</pr{# b #}e>\n",
+        ),
+        (
+            "<title>\n\n</ti{# a #}tle>\n\n",
+            "<title>\n\n</ti{# a #}tle>\n",
+        ),
+        (
+            "<script ty{# a #}pe=\"b\">\n\n</script>",
+            "<script ty{# a #}pe=\"b\">\n\n</script>",
+        ),
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
@@ -183,6 +344,8 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
     let cases = [
         ("<p>a</p>\n  <!-- b -->", 2, 3, HtmlComment),
         ("<!---->", 1, 1, HtmlComment),
+        ("<script>\n  a = b<!--c;\n</script>", 2, 8, HtmlComment),
+        ("<script type=\"a\"><!{# b #}--", 1, 18, HtmlComment),
         ("a < b", 1, 3, LessThan),
         ("a <3", 1, 3, LessThan),
         ("a\n</>", 2, 1, LessThan),
@@ -203,6 +366,12 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
         ("<a href=\"/\"=\"b\">", 1, 12, UnquotedValue),
         ("<a href={# b #}c>", 1, 16, UnquotedValue),
         ("<p a\u{c}=\"b\">", 1, 6, UnquotedValue),
+        // In `svg` and `math`, a browser reads a tag where HTML has the text of a script.
+        ("<svg><script>a < b;</script>", 1, 16, ForeignMarkup),
+        ("<MATH><title>a<b>", 1, 15, ForeignMarkup),
+        ("<svg><svg></svg><style></styles>", 1, 24, ForeignMarkup),
+        ("<svg><textarea><!{# a #}-", 1, 16, ForeignMarkup),
+        ("<p>\n<svg><circle r=\"1\"/>", 2, 1, UnclosedElement),
         ("<p>a <b c</p>", 1, 6, UnclosedTag),
         ("<p\n  class=\"a\"\n", 1, 1, UnclosedTag),
         ("a\n <a href=\"/>b</a>", 2, 2, UnclosedTag),
@@ -210,11 +379,24 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
         ("<a href=", 1, 1, UnclosedTag),
         ("<p<b>", 1, 1, UnclosedTag),
         ("</p <b>", 1, 1, UnclosedTag),
-        // For now: `pre`, and each element whose text is no markup.
-        ("a\n<pre>b</pre>", 2, 1, UnreadElement),
-        ("<p>\n  <SCRIPT src=\"/a.js\">", 2, 3, UnreadElement),
-        ("<p{# a #}re>", 1, 1, UnreadElement),
-        ("<textarea></textarea>", 1, 1, UnreadElement),
+        ("a\n<pre>b", 2, 1, UnclosedElement),
+        ("<pre><pre></pre>", 1, 1, UnclosedElement),
+        ("<pre>a\n<pre>b", 1, 1, UnclosedElement),
+        ("<p>\n  <script>a();</scripts>", 2, 3, UnclosedElement),
+        ("<title>a</title><title>b</title", 1, 17, UnclosedElement),
+        ("<textarea>", 1, 1, UnclosedElement),
+        ("<style>a {}</ style>", 1, 1, UnclosedElement),
+        ("<p>a</p><plaintext>b", 1, 9, UnclosedElement),
+        // In an SVG image `<title/>` is a whole element, and in HTML the start of one.
+        ("<svg><title/></svg>", 1, 6, SelfClosed),
+        ("a\n<script src=\"/a.js\" />b();", 2, 1, SelfClosed),
+        ("<textarea{# a #}/{# b #}>", 1, 1, SelfClosed),
+        ("<script>\n  a = `b`;\n</script>", 2, 7, Backtick),
+        ("<script>// It`s</script>", 1, 14, Backtick),
+        ("<script>a = \"b\\\n  c\";</script>", 1, 15, BrokenString),
+        ("<script>a = 'b\\  \r\n';</script>", 1, 15, BrokenString),
+        ("<script>// c:\\\n</script>", 1, 14, BrokenString),
+        ("<script>a = \"b\\{# c #}\n", 1, 15, BrokenString),
     ];
     for (layout, line, col, kind) in cases {
         assert_eq!(error(layout), Some((line, col, kind)), "{layout:?}");
@@ -227,6 +409,7 @@ fn an_error_is_where_the_layout_has_it_after_any_run_and_columns_count_character
         ("é <", 1, 3, LessThan),
         ("<p title=\"é\" é='é'>", 1, 16, UnquotedValue),
         ("é{# é\né #}é\n é{# é #}<é", 3, 10, LessThan),
+        ("<script>\n  é = 1; {# é #} `", 2, 18, Backtick),
     ];
     for (layout, line, col, kind) in cases {
         assert_eq!(error(layout), Some((line, col, kind)), "{layout:?}");

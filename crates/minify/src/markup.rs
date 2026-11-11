@@ -1,8 +1,9 @@
 //! The scan of a layout's markup, which comes in runs: the layout's own text between its template
-//! tags. At each character the scan is in text or in a tag, and it keeps that place from one run
-//! to the next, since a template tag often stands inside a tag. It writes a run of white space
-//! with a line break in it as one line break, and stops at what could put a browser's parser in
-//! another place than its own.
+//! tags. At each character the scan is in text, in a tag, or in the text of an element that an
+//! HTML parser does not read as markup, and it keeps that place from one run to the next, since a
+//! template tag often stands inside a tag. It writes a run of white space with a line break in it
+//! as one line break, and stops at what could put a browser's parser in another place than its
+//! own.
 
 use std::mem;
 
@@ -19,35 +20,28 @@ const FORM_FEED: char = '\u{c}';
 /// What follows `<!` in the one declaration that the scan lets through, in any letter case.
 const DOCTYPE: &str = "doctype html";
 
-/// The elements that the scan does not read yet: `pre`, which shows its white space as written,
-/// and those whose text an HTML parser does not read as markup.
-const UNREAD: [&str; 12] = [
-    "pre",
-    "script",
-    "style",
-    "title",
-    "textarea",
-    "iframe",
-    "noscript",
-    "xmp",
-    "listing",
-    "plaintext",
-    "noembed",
-    "noframes",
-];
+/// What starts an HTML comment.
+const COMMENT: &str = "<!--";
 
 /// The scan of the markup of one layout, from `Markup::default()` on. A layout's own text comes
 /// to [`Markup::text`] run by run, in the order of the source: two runs in a row are neighbours
 /// in every page, as around a comment of the template language. [`Markup::finish`] ends the scan,
 /// and so does its first error.
 ///
-/// A run of white space with a line break in it is written as one line break, in text between
-/// tags and between the attributes of a tag. Everything else is written as it is: the other white
-/// space, and each value of an attribute.
+/// A run of white space with a line break in it is written as one line break: in text between
+/// tags, between the attributes of a tag, and in a script without a `type`. Everything else is
+/// written as it is: the other white space, each value of an attribute, what is in `pre`, and the
+/// text of a script with a `type` and of the other elements whose text an HTML parser does not
+/// read as markup, such as `textarea`, `title` and `style`.
 #[derive(Debug, Default)]
 pub struct Markup {
     /// Where the scan is.
     place: Place,
+    /// Where the `<` of each `pre` that is still open is.
+    pre: Vec<Pos>,
+    /// Where the `<` of each `svg` and `math` that is still open is. A browser reads what they
+    /// hold by other rules than those of HTML: every `<` is markup there.
+    foreign: Vec<Pos>,
     /// The white space that the scan is in.
     run: Run,
 }
@@ -60,6 +54,8 @@ enum Place {
     Text,
     /// In a tag, or in the `<!DOCTYPE html>` of a page.
     Tag(Tag),
+    /// In the text of an element that is no markup.
+    Kept(Kept),
 }
 
 /// A tag that the scan is in.
@@ -75,6 +71,8 @@ struct Tag {
     name: String,
     /// The name of the attribute that the scan is in, as far as read.
     attribute: String,
+    /// Whether it has an attribute `type`.
+    typed: bool,
 }
 
 /// The parts of a tag.
@@ -88,10 +86,42 @@ enum Part {
     Name,
     /// After the name: the attributes, and what parts them.
     Attributes,
+    /// Right after a `/` that parts attributes. Before the `>` of a start tag it ends an element
+    /// of an SVG image, and does nothing in HTML.
+    Slash,
     /// Right after the `=` of an attribute.
     Equals,
     /// The value of an attribute, in its double quotes.
     Value,
+}
+
+/// An element whose text an HTML parser does not read as markup, in which the scan is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Kept {
+    /// Where the `<` of its start tag is.
+    start: Pos,
+    /// How the scan reads its text.
+    reading: Reading,
+    /// What starts its end tag, in lowercase, such as `</title`.
+    end: String,
+    /// Where the last `<` of its text is and the text from there on, while that may still become
+    /// its end tag or, in a script, `<!--`.
+    tail: Option<(Pos, String)>,
+    /// Where the `\` of a script is that only white space parts from the scan.
+    escape: Option<Pos>,
+}
+
+/// How the scan reads the text of an element that is no markup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reading {
+    /// As it is written: `title`, `textarea`, `noscript`, `style` and `iframe`, and the elements
+    /// of old that an HTML parser still reads so, or shows as written: `xmp`, `listing`,
+    /// `plaintext`, `noembed`, `noframes`.
+    Kept,
+    /// As a script with a `type`, which may not be JavaScript.
+    Typed,
+    /// As JavaScript, where a run of white space with a line break is written as one line break.
+    Script,
 }
 
 /// The white space that the scan is in, where it writes a run with a line break as one.
@@ -121,16 +151,20 @@ impl Markup {
         Ok(out)
     }
 
-    /// Ends the scan at the end of the layout, where no tag is open.
+    /// Ends the scan at the end of the layout, where no tag is open, and neither a `pre`, an
+    /// `svg`, a `math` nor an element whose text is no markup.
     pub fn finish(self) -> Result<(), Error> {
-        let (pos, kind) = match self.place {
-            Place::Text => return Ok(()),
-            Place::Tag(tag) => match tag.part {
+        let open = self.pre.first().or(self.foreign.first());
+        let (pos, kind) = match (self.place, open) {
+            (Place::Text, None) => return Ok(()),
+            (Place::Text, Some(open)) => (*open, ErrorKind::UnclosedElement),
+            (Place::Tag(tag), _) => match tag.part {
                 Part::Open | Part::Declaration => (tag.open, ErrorKind::LessThan),
-                Part::Name | Part::Attributes | Part::Equals | Part::Value => {
+                Part::Name | Part::Attributes | Part::Slash | Part::Equals | Part::Value => {
                     (tag.open, ErrorKind::UnclosedTag)
                 }
             },
+            (Place::Kept(kept), _) => (kept.start, ErrorKind::UnclosedElement),
         };
         Err(Error { pos, kind })
     }
@@ -138,11 +172,12 @@ impl Markup {
     /// Reads the character `c` at `pos`, and writes it to `out` unless it is white space that a
     /// line break stands for.
     fn read(&mut self, pos: Pos, c: char, out: &mut String) -> Result<(), Error> {
-        let in_run = self.place.shortens() && BLANKS.contains(&c);
+        let in_run = self.pre.is_empty() && self.place.shortens() && BLANKS.contains(&c);
         self.place = match mem::take(&mut self.place) {
             Place::Text if c == '<' => Place::Tag(Tag::new(pos)),
             Place::Text => Place::Text,
             Place::Tag(tag) => self.tag(tag, pos, c)?,
+            Place::Kept(kept) => self.kept(kept, pos, c)?,
         };
         self.run = match self.run {
             Run::Blanks(written) if in_run && c == '\n' => {
@@ -195,7 +230,14 @@ impl Markup {
                     _ => return refused(tag.open, ErrorKind::LessThan),
                 }
             }
-            Part::Name | Part::Attributes if c == '>' => return self.close(tag),
+            Part::Name | Part::Attributes | Part::Slash if c == '>' => {
+                tag.end_attribute();
+                return self.close(tag);
+            }
+            Part::Slash => {
+                tag.part = Part::Attributes;
+                return self.tag(tag, pos, c);
+            }
             Part::Name | Part::Attributes => match c {
                 '<' => return refused(tag.open, ErrorKind::UnclosedTag),
                 // An HTML parser takes a `=` with no name before it for the start of a name, and
@@ -204,11 +246,15 @@ impl Markup {
                     return refused(pos, ErrorKind::UnquotedValue);
                 }
                 '=' if tag.part == Part::Attributes => {
-                    tag.attribute.clear();
+                    tag.end_attribute();
                     tag.part = Part::Equals;
                 }
-                _ if c == '/' || is_space(c) => {
-                    tag.attribute.clear();
+                '/' => {
+                    tag.end_attribute();
+                    tag.part = Part::Slash;
+                }
+                _ if is_space(c) => {
+                    tag.end_attribute();
                     tag.part = Part::Attributes;
                 }
                 _ if tag.part == Part::Name => tag.name.push(c),
@@ -222,18 +268,110 @@ impl Markup {
         Ok(Place::Tag(tag))
     }
 
-    /// The place after the `>` of `tag`: text between tags, unless `tag` starts an element that
-    /// the scan does not read yet.
+    /// The place after the `>` of `tag`: the text of its element, if an HTML parser does not read
+    /// that as markup, and else text between tags. A `pre` is open from its start tag to its end
+    /// tag, and may hold another, and so are `svg` and `math`.
     fn close(&mut self, tag: Tag) -> Result<Place, Error> {
-        if !tag.end
-            && UNREAD
-                .iter()
-                .any(|name| tag.name.eq_ignore_ascii_case(name))
-        {
-            let (pos, kind) = (tag.open, ErrorKind::UnreadElement);
+        let name = tag.name.to_ascii_lowercase();
+        let reading = match (name.as_str(), tag.end) {
+            ("pre", false) => {
+                self.pre.push(tag.open);
+                return Ok(Place::Text);
+            }
+            ("pre", true) => {
+                self.pre.pop();
+                return Ok(Place::Text);
+            }
+            ("svg" | "math", false) if tag.part != Part::Slash => {
+                self.foreign.push(tag.open);
+                return Ok(Place::Text);
+            }
+            ("svg" | "math", true) => {
+                self.foreign.pop();
+                return Ok(Place::Text);
+            }
+            (
+                "title" | "textarea" | "noscript" | "style" | "iframe" | "xmp" | "listing"
+                | "plaintext" | "noembed" | "noframes",
+                false,
+            ) => Reading::Kept,
+            ("script", false) if tag.typed => Reading::Typed,
+            ("script", false) => Reading::Script,
+            _ => return Ok(Place::Text),
+        };
+        // An SVG image has such elements too, and there `/>` ends one, with no text.
+        if tag.part == Part::Slash {
+            let (pos, kind) = (tag.open, ErrorKind::SelfClosed);
             return Err(Error { pos, kind });
         }
-        Ok(Place::Text)
+        Ok(Place::Kept(Kept {
+            start: tag.open,
+            reading,
+            end: format!("</{name}"),
+            tail: None,
+            escape: None,
+        }))
+    }
+
+    /// Reads the character `c` at `pos` of the text of `kept`, and gives the place after it: the
+    /// end tag of `kept` once `</`, its name and then white space, `/` or `>` have come, which is
+    /// the only end that an HTML parser knows of such an element, in a string of a script too.
+    fn kept(&mut self, mut kept: Kept, pos: Pos, c: char) -> Result<Place, Error> {
+        let is_script = match kept.reading {
+            Reading::Script | Reading::Typed => true,
+            Reading::Kept => false,
+        };
+        let ends_name = c == '/' || c == '>' || is_space(c);
+        match kept.tail.take() {
+            Some((open, text)) if ends_name && text.len() == kept.end.len() => {
+                let mut tag = Tag::new(open);
+                (tag.part, tag.end) = (Part::Name, true);
+                tag.name.extend(text.chars().skip(2));
+                return self.tag(tag, pos, c);
+            }
+            Some((open, mut text)) => {
+                text.push(c);
+                // After `<!--`, an HTML parser may read past the `</script>` that follows.
+                let is_comment = is_script && starts(COMMENT, &text);
+                if is_comment && text.len() == COMMENT.len() {
+                    let kind = ErrorKind::HtmlComment;
+                    return Err(Error { pos: open, kind });
+                }
+                if is_comment || starts(&kept.end, &text) {
+                    kept.tail = Some((open, text));
+                } else if !self.foreign.is_empty() {
+                    // In `svg` and `math`, the text of such an element is markup to a browser.
+                    let (pos, kind) = (open, ErrorKind::ForeignMarkup);
+                    return Err(Error { pos, kind });
+                }
+            }
+            None => {}
+        }
+        if c == '<' {
+            kept.tail = Some((pos, String::from(c)));
+        }
+        match kept.reading {
+            // In JavaScript only a template literal and a string that a `\` carries on hold a
+            // line break with blanks around it that count; every other one parts two tokens, or
+            // is in a comment.
+            Reading::Script => match c {
+                '`' => {
+                    let kind = ErrorKind::Backtick;
+                    return Err(Error { pos, kind });
+                }
+                '\\' => kept.escape = Some(pos),
+                '\n' => {
+                    if let Some(pos) = kept.escape {
+                        let kind = ErrorKind::BrokenString;
+                        return Err(Error { pos, kind });
+                    }
+                }
+                _ if BLANKS.contains(&c) => {}
+                _ => kept.escape = None,
+            },
+            Reading::Typed | Reading::Kept => {}
+        }
+        Ok(Place::Kept(kept))
     }
 }
 
@@ -250,11 +388,12 @@ fn starts(whole: &str, start: &str) -> bool {
 
 impl Place {
     /// Whether a run of white space with a line break is written as one line break here: in
-    /// text, and in a tag outside the values of its attributes.
+    /// text, in a tag outside the values of its attributes, and in JavaScript.
     fn shortens(&self) -> bool {
         match self {
             Self::Text => true,
             Self::Tag(tag) => tag.part != Part::Value,
+            Self::Kept(kept) => kept.reading == Reading::Script,
         }
     }
 }
@@ -268,7 +407,14 @@ impl Tag {
             end: false,
             name: String::new(),
             attribute: String::new(),
+            typed: false,
         }
+    }
+
+    /// Ends the name of an attribute, if the scan is in one.
+    fn end_attribute(&mut self) {
+        self.typed |= self.attribute.eq_ignore_ascii_case("type");
+        self.attribute.clear();
     }
 }
 
