@@ -56,7 +56,7 @@ flowchart LR
     subgraph Crates["Rust Workspace (std only)"]
         YAML["edu-yaml\nparse_front_matter & parse"]
         MARK["edu-markdown\nto_html (2-pass)"]
-        TMPL["edu-template\nTemplate::parse & render"]
+        TMPL["edu-template\nTemplate::parse, walk & render"]
         MIN["edu-minify\ncss"]
         SITE["edu-site (edu CLI)\ncheck, build, serve"]
     end
@@ -96,7 +96,8 @@ flowchart LR
     ordered `Map`): `{{ path }}` writes text with `&`, `<`, `>`, `"` and `'` escaped, `{{ path | safe }}` writes raw
     HTML such as `page.content`, `{# … #}` is a comment, and `if`/`else`/`for` handle branches and lists, with one
     outer `layouts/layout.html` wrapping each page layout (`home.html`, `page.html`, `section.html`, `news.html`) at
-    `{{ content | safe }}` instead of `extends` and `block`.
+    `{{ content | safe }}` instead of `extends` and `block`. `Template::walk` goes through a parsed layout in the
+    order of its source, so that another crate can check or change the layout's own text.
   - `crates/minify` (`edu-minify`) — smaller copies of the texts that the site publishes, made only by deleting bytes:
     a stylesheet without its comments, without the blanks at the start and the end of each line, and without the lines
     left empty. It reads no rule or value, so every token stays as written; it keeps a comment that starts with `/*!`,

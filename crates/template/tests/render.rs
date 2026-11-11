@@ -1,11 +1,11 @@
-//! The template language through its public API: what each template renders with a context, and
-//! where each error points.
+//! The template language through its public API: what each template renders with a context,
+//! where each error points, and what a walk through a template meets.
 
 use edu_template::ErrorKind::{
     BadPath, BadTag, NotList, NotText, StrayElse, StrayEndfor, StrayEndif, TooDeep, UnclosedTag,
     UnendedFor, UnendedIf, UnknownFilter, UnknownVariable,
 };
-use edu_template::{ErrorKind, Template, Value};
+use edu_template::{ErrorKind, Pos, Step, Template, Value};
 
 fn text(text: &str) -> Value {
     Value::Str(text.to_owned())
@@ -229,6 +229,84 @@ const SAMPLE: &str = "\
 <li><a href=\"{{ page.url }}\">{{ page.title }}</a></li>{% endfor %}</ul>
 ";
 
+/// A list with an item for each line, its text between comments and white space, and then an `if`
+/// with both parts and one without an `else`.
+const WALKED: &str = concat!(
+    "<ul>\n  {% for item in items %}\n  <li>{{ item }}</li>{# no #}  \n{% endfor %}</ul>",
+    "{% if a %}é{{ b | safe }}{% else %}{# c #}{% endif %}{%  if a %}{% endif %}",
+);
+
+#[test]
+fn a_walk_meets_the_text_the_values_and_the_parts_in_the_order_of_the_source() {
+    let mut template = Template::parse(WALKED).unwrap();
+    let mut met = Vec::new();
+    let mut note = |pos: Pos, step: Step<'_>| {
+        let step = match step {
+            Step::Text(text) => format!("{text:?}"),
+            Step::Print { safe: false } => "a value".to_owned(),
+            Step::Print { safe: true } => "a safe value".to_owned(),
+            Step::Start => "start".to_owned(),
+            Step::End => "end".to_owned(),
+        };
+        met.push((pos.line, pos.col, step));
+        Ok::<_, ()>(())
+    };
+    template.walk(&mut note).unwrap();
+    // A run of text is where it starts and a tag where its first word is; a comment only parts
+    // two runs, and a part without text has its start and its end all the same.
+    let expected = [
+        (1, 1, "\"<ul>\\n  \""),
+        (2, 6, "start"),
+        (2, 26, "\"\\n  <li>\""),
+        (3, 10, "a value"),
+        (3, 17, "\"</li>\""),
+        (3, 30, "\"  \\n\""),
+        (4, 4, "end"),
+        (4, 13, "\"</ul>\""),
+        (4, 21, "start"),
+        (4, 28, "\"é\""),
+        (4, 32, "a safe value"),
+        (4, 46, "end"),
+        (4, 46, "start"),
+        (4, 63, "end"),
+        (4, 75, "start"),
+        (4, 85, "end"),
+    ];
+    let expected = expected.map(|(line, col, step)| (line, col, step.to_owned()));
+    assert_eq!(met, expected);
+}
+
+#[test]
+fn a_walk_can_change_each_run_of_text_and_ends_at_the_first_error() {
+    let mut template = Template::parse(WALKED).unwrap();
+    let mut trim = |_: Pos, step: Step<'_>| {
+        match step {
+            Step::Text(text) => *text = text.trim().to_uppercase(),
+            Step::Print { .. } | Step::Start | Step::End => {}
+        }
+        Ok::<_, ()>(())
+    };
+    template.walk(&mut trim).unwrap();
+    let items = Value::List(vec![text("a"), text("b")]);
+    let (a, b) = (Value::Bool(true), text("<b>"));
+    let context = map(&[("items", items), ("a", a), ("b", b)]);
+    let rendered = template.render(&context).unwrap();
+    assert_eq!(rendered, "<UL><LI>a</LI><LI>b</LI></UL>É<b>");
+    // The tags keep the positions of the source.
+    let error = template.render(&map(&[])).unwrap_err();
+    assert_eq!((error.pos.line, error.pos.col), (2, 18));
+    // The first error ends the walk, whichever of the 16 steps it comes at.
+    for last in 1..=16 {
+        let mut steps = 0;
+        let mut refuse = |_: Pos, _: Step<'_>| {
+            steps += 1;
+            if steps == last { Err(steps) } else { Ok(()) }
+        };
+        assert_eq!(template.walk(&mut refuse), Err(last));
+        assert_eq!(steps, last);
+    }
+}
+
 #[test]
 fn a_damaged_template_gives_html_or_an_error_never_a_panic() {
     let context = context();
@@ -254,6 +332,10 @@ fn a_damaged_template_gives_html_or_an_error_never_a_panic() {
             }
         }
         let text: String = text.into_iter().collect();
-        let _ = Template::parse(&text).and_then(|template| template.render(&context));
+        let _ = Template::parse(&text).and_then(|mut template| {
+            let walked = template.walk(&mut |_, _| Ok::<_, ()>(()));
+            assert_eq!(walked, Ok(()));
+            template.render(&context)
+        });
     }
 }

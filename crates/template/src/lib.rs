@@ -8,6 +8,10 @@
 //! Everything else is written as it is. Other tags and filters, and values that are missing or of
 //! the wrong kind where they are needed, are errors with a line and column; [`ErrorKind`] lists
 //! them.
+//!
+//! [`Template::walk`] goes through a parsed template in the order of its source, for a caller that
+//! checks or changes the template's own text: each [`Step`] is a run of that text, a `{{ … }}`, or
+//! the start or the end of a part that a rendering may leave out or repeat.
 
 mod parse;
 
@@ -102,21 +106,52 @@ pub struct Template {
 
 #[derive(Debug)]
 enum Node {
-    Text(String),
+    /// A run of the template's own text, and where it starts.
+    Text(Pos, String),
     Print {
         path: Path,
         safe: bool,
     },
     If {
         path: Path,
-        then: Vec<Node>,
-        otherwise: Vec<Node>,
+        then: Part,
+        /// The part after `else`, if the `if` has one.
+        otherwise: Option<Part>,
     },
     For {
         name: String,
         path: Path,
-        body: Vec<Node>,
+        body: Part,
     },
+}
+
+/// The nodes that a rendering may leave out or repeat: those of one branch of an `if`, or of a
+/// `for`.
+#[derive(Debug)]
+struct Part {
+    /// Where the tag that starts the part is: its `if`, `else` or `for`.
+    start: Pos,
+    nodes: Vec<Node>,
+    /// Where the tag that ends the part is: its `else`, `endif` or `endfor`.
+    end: Pos,
+}
+
+/// What [`Template::walk`] meets in a template, in the order of its source.
+#[derive(Debug)]
+pub enum Step<'a> {
+    /// A run of the template's own text, which the walk's caller may change. A `{# … #}` comment
+    /// is no step, so two runs in a row had only comments between them, and a rendering writes
+    /// them one right after the other.
+    Text(&'a mut String),
+    /// A `{{ … }}`, which writes a value: as it is if `safe`, and with HTML's special characters
+    /// escaped if not.
+    Print { safe: bool },
+    /// The start of a part that a rendering may leave out or repeat: an `if`, an `else` or a
+    /// `for`.
+    Start,
+    /// The end of the part that the last `Start` without its `End` started: an `else`, an `endif`
+    /// or an `endfor`. An `else` is the end of one part and then the start of another.
+    End,
 }
 
 /// Names joined by `.`, and where they start in the template.
@@ -139,6 +174,50 @@ impl Template {
         render(&self.nodes, context, &mut Vec::new(), &mut out)?;
         Ok(out)
     }
+
+    /// Goes through the template in the order of its source, and calls `visit` with each step and
+    /// its position: where a run of text starts, and the first word of a tag, as in an error. The
+    /// first error of `visit` ends the walk. A change to a run of text changes what the template
+    /// renders, and no position of a tag.
+    pub fn walk<E>(
+        &mut self,
+        visit: &mut impl FnMut(Pos, Step<'_>) -> Result<(), E>,
+    ) -> Result<(), E> {
+        walk(&mut self.nodes, visit)
+    }
+}
+
+/// [`Template::walk`] through `nodes`, and through the parts of each `if` and `for` in them.
+fn walk<E>(
+    nodes: &mut [Node],
+    visit: &mut impl FnMut(Pos, Step<'_>) -> Result<(), E>,
+) -> Result<(), E> {
+    for node in nodes {
+        match node {
+            Node::Text(pos, text) => visit(*pos, Step::Text(text))?,
+            Node::Print { path, safe } => visit(path.pos, Step::Print { safe: *safe })?,
+            Node::If {
+                then, otherwise, ..
+            } => {
+                walk_part(then, visit)?;
+                if let Some(part) = otherwise {
+                    walk_part(part, visit)?;
+                }
+            }
+            Node::For { body, .. } => walk_part(body, visit)?,
+        }
+    }
+    Ok(())
+}
+
+/// [`Template::walk`] through `part`, between the steps of its start and its end.
+fn walk_part<E>(
+    part: &mut Part,
+    visit: &mut impl FnMut(Pos, Step<'_>) -> Result<(), E>,
+) -> Result<(), E> {
+    visit(part.start, Step::Start)?;
+    walk(&mut part.nodes, visit)?;
+    visit(part.end, Step::End)
 }
 
 /// The loop items around a node, by name, innermost last.
@@ -153,7 +232,7 @@ fn render<'a>(
 ) -> Result<(), Error> {
     for node in nodes {
         match node {
-            Node::Text(text) => out.push_str(text),
+            Node::Text(_, text) => out.push_str(text),
             Node::Print { path, safe } => match path.lookup(context, scope) {
                 Some(Value::Str(text)) if *safe => out.push_str(text),
                 Some(Value::Str(text)) => escape(out, text),
@@ -168,7 +247,14 @@ fn render<'a>(
                 otherwise,
             } => {
                 let is_true = path.lookup(context, scope).is_some_and(Value::is_true);
-                render(if is_true { then } else { otherwise }, context, scope, out)?;
+                let part = if is_true {
+                    Some(then)
+                } else {
+                    otherwise.as_ref()
+                };
+                if let Some(part) = part {
+                    render(&part.nodes, context, scope, out)?;
+                }
             }
             Node::For { name, path, body } => {
                 let items = match path.lookup(context, scope) {
@@ -180,7 +266,7 @@ fn render<'a>(
                 };
                 for item in items {
                     scope.push((name, item));
-                    render(body, context, scope, out)?;
+                    render(&body.nodes, context, scope, out)?;
                     scope.pop();
                 }
             }

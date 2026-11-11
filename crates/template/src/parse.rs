@@ -3,13 +3,13 @@
 
 use std::mem;
 
-use crate::{Error, ErrorKind, MAX_DEPTH, Node, Path, Pos};
+use crate::{Error, ErrorKind, MAX_DEPTH, Node, Part, Path, Pos};
 
 pub(crate) fn parse(text: &str) -> Result<Vec<Node>, Error> {
     let mut parser = Parser::default();
     let mut at = 0;
     while let Some((open, kind)) = next_tag(text, at) {
-        push_text(parser.nodes(), text.get(at..open).unwrap_or_default());
+        push_text(parser.nodes(), text, at, open);
         let close = match kind {
             Open::Print => "}}",
             Open::Tag => "%}",
@@ -29,7 +29,7 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Node>, Error> {
         }
         at = start + len + close.len();
     }
-    push_text(parser.nodes(), text.get(at..).unwrap_or_default());
+    push_text(parser.nodes(), text, at, text.len());
     parser.finish()
 }
 
@@ -45,8 +45,8 @@ struct Block {
     pos: Pos,
     start: Start,
     nodes: Vec<Node>,
-    /// The nodes before the `else` of an `if`, once its `else` is parsed.
-    then: Option<Vec<Node>>,
+    /// The part before the `else` of an `if`, once its `else` is parsed.
+    then: Option<Part>,
 }
 
 enum Start {
@@ -107,12 +107,13 @@ impl Parser {
     fn otherwise(&mut self, pos: Pos) -> Result<(), Error> {
         match self.blocks.last_mut() {
             Some(Block {
+                pos: start,
                 start: Start::If(_),
                 then: then @ None,
                 nodes,
-                ..
             }) => {
-                *then = Some(mem::take(nodes));
+                let (start, nodes, end) = (*start, mem::take(nodes), pos);
+                *then = Some(Part { start, nodes, end });
                 Ok(())
             }
             None
@@ -126,23 +127,26 @@ impl Parser {
         }
     }
 
-    /// An `endif`, which ends the innermost block, an `if`.
-    fn end_if(&mut self, pos: Pos) -> Result<(), Error> {
+    /// An `endif` at `end`, which ends the innermost block, an `if`.
+    fn end_if(&mut self, end: Pos) -> Result<(), Error> {
         let block = self
             .blocks
             .pop_if(|block| matches!(block.start, Start::If(_)));
         let Some(Block {
+            pos: start,
             start: Start::If(path),
             nodes,
             then,
-            ..
         }) = block
         else {
-            return Err(Error::new(pos, ErrorKind::StrayEndif));
+            return Err(Error::new(end, ErrorKind::StrayEndif));
         };
+        // The last part starts at the `else`, or at the `if` without one.
+        let start = then.as_ref().map_or(start, |then| then.end);
+        let last = Part { start, nodes, end };
         let (then, otherwise) = match then {
-            Some(then) => (then, nodes),
-            None => (nodes, Vec::new()),
+            Some(then) => (then, Some(last)),
+            None => (last, None),
         };
         self.nodes().push(Node::If {
             path,
@@ -152,19 +156,21 @@ impl Parser {
         Ok(())
     }
 
-    /// An `endfor`, which ends the innermost block, a `for`.
-    fn end_for(&mut self, pos: Pos) -> Result<(), Error> {
+    /// An `endfor` at `end`, which ends the innermost block, a `for`.
+    fn end_for(&mut self, end: Pos) -> Result<(), Error> {
         let block = self
             .blocks
             .pop_if(|block| matches!(block.start, Start::For(..)));
         let Some(Block {
+            pos: start,
             start: Start::For(name, path),
-            nodes: body,
+            nodes,
             ..
         }) = block
         else {
-            return Err(Error::new(pos, ErrorKind::StrayEndfor));
+            return Err(Error::new(end, ErrorKind::StrayEndfor));
         };
+        let body = Part { start, nodes, end };
         self.nodes().push(Node::For { name, path, body });
         Ok(())
     }
@@ -211,9 +217,12 @@ fn pos(text: &str, at: usize) -> Pos {
     Pos { line, col }
 }
 
-fn push_text(nodes: &mut Vec<Node>, text: &str) {
-    if !text.is_empty() {
-        nodes.push(Node::Text(text.to_owned()));
+/// Adds the bytes of `text` from `start` to `end`, a run of the template's own text, to `nodes`,
+/// unless the run is empty.
+fn push_text(nodes: &mut Vec<Node>, text: &str, start: usize, end: usize) {
+    let run = text.get(start..end).unwrap_or_default();
+    if !run.is_empty() {
+        nodes.push(Node::Text(pos(text, start), run.to_owned()));
     }
 }
 
