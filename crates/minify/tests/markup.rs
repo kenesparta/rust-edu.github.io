@@ -2,20 +2,26 @@
 //! as, and where each error points.
 
 use edu_minify::ErrorKind::{
-    Backtick, BrokenString, ForeignMarkup, HtmlComment, LessThan, SelfClosed, UnclosedElement,
-    UnclosedTag, UnquotedValue,
+    Backtick, BrokenString, ForeignMarkup, HtmlComment, LessThan, SafeValue, SelfClosed, SplitPart,
+    UnclosedElement, UnclosedTag, UnquotedValue, ValueInScript, ValueInTag,
 };
 use edu_minify::{Error, ErrorKind, Markup, Pos};
 
-/// The pieces of `layout` in order: each comment of the template language, from `{#` to the first
-/// `#}` after it, and each run of the layout's own text between two of them.
+/// The marks that open and close a tag of the template language.
+const MARKS: [(&str, &str); 3] = [("{{", "}}"), ("{%", "%}"), ("{#", "#}")];
+
+/// The pieces of `layout` in order: each tag of the template language, from its opening mark to
+/// the first closing mark after it, and each run of the layout's own text between two of them.
 fn pieces(layout: &str) -> Vec<&str> {
     let mut pieces = Vec::new();
     let mut rest = layout;
     while !rest.is_empty() {
-        let len = match rest.strip_prefix("{#") {
-            Some(comment) => comment.find("#}").map_or(rest.len(), |at| at + 4),
-            None => rest.find("{#").unwrap_or(rest.len()),
+        let len = match MARKS.iter().find(|(open, _)| rest.starts_with(open)) {
+            Some((_, close)) => rest[2..].find(close).map_or(rest.len(), |at| at + 4),
+            None => {
+                let next = MARKS.iter().filter_map(|(open, _)| rest.find(open)).min();
+                next.unwrap_or(rest.len())
+            }
         };
         let (piece, after) = rest.split_at(len);
         pieces.push(piece);
@@ -35,14 +41,29 @@ fn after(pos: Pos, text: &str) -> Pos {
     })
 }
 
-/// `layout` as the scan writes it: its own text run by run, and each comment of the template as
-/// it is.
+/// `layout` as the scan writes it: its own text run by run, and each tag of the template as it
+/// is. The scan hears of a `{{ … }}`, and of the start and the end of the part of an `if`, an
+/// `else` or a `for`, at the first word of the tag, as `edu-site` tells it of a parsed layout.
 fn minified(layout: &str) -> Result<String, Error> {
     let mut markup = Markup::default();
     let mut written = String::new();
     let mut pos = Pos { line: 1, col: 1 };
     for piece in pieces(layout) {
-        if piece.starts_with("{#") {
+        if MARKS.iter().any(|(open, _)| piece.starts_with(open)) {
+            let word = piece[2..].trim_start();
+            let at = after(pos, &piece[..piece.len() - word.len()]);
+            let is_safe = word.trim_end_matches(['}', ' ']).ends_with("safe");
+            let first = word.split([' ', '%']).next().unwrap_or_default();
+            match (&piece[..2], first) {
+                ("{{", _) => markup.print(at, is_safe)?,
+                ("{%", "if" | "for") => markup.start(),
+                ("{%", "else") => {
+                    markup.end(at)?;
+                    markup.start();
+                }
+                ("{%", "endif" | "endfor") => markup.end(at)?,
+                _ => {}
+            }
             written.push_str(piece);
         } else {
             written.push_str(&markup.text(pos, piece)?);
@@ -289,7 +310,7 @@ fn a_script_keeps_each_line_break_between_two_lines_and_loses_the_blanks_around_
 }
 
 #[test]
-fn a_comment_of_the_template_parts_no_run_of_white_space() {
+fn a_comment_of_the_template_parts_no_white_space_and_another_tag_of_it_does() {
     let cases = [
         // Where a comment stood alone on its line, one line break is left.
         (
@@ -305,6 +326,20 @@ fn a_comment_of_the_template_parts_no_run_of_white_space() {
         // The blanks before a comment are written before the scan sees the line break after it.
         ("a  {# b #}  \n  c", "a  {# b #}\nc"),
         ("a  {# b #}  c", "a  {# b #}  c"),
+        // What a value is, and whether a part is there, is not for the scan to know.
+        ("a \n {{ b }} \n c", "a\n{{ b }}\nc"),
+        (
+            "a  {{ b }}  \n\n  {{ c | safe }}\n",
+            "a  {{ b }}\n{{ c | safe }}\n",
+        ),
+        (
+            "<ul>\n    {% for a in b %}\n    <li>{{ a }}</li>\n    {% endfor %}\n</ul>",
+            "<ul>\n{% for a in b %}\n<li>{{ a }}</li>\n{% endfor %}\n</ul>",
+        ),
+        (
+            "{% if a %}\n\n<p>b</p>\n\n{% else %}\n\n{% endif %}\n\n",
+            "{% if a %}\n<p>b</p>\n{% else %}\n{% endif %}\n",
+        ),
         // A comment in the middle of a name or of an end tag is not there for a browser.
         (
             "<p{# a #}re>\n\n</pr{# b #}e>\n\n",
@@ -325,7 +360,39 @@ fn a_comment_of_the_template_parts_no_run_of_white_space() {
 }
 
 #[test]
+fn a_value_goes_in_text_and_in_quotes_and_a_part_ends_where_it_starts() {
+    let kept = [
+        "{{ a }}<p class=\"b {{ c }}\" id=\"{{ d }}\">{{ e }}</p>{{ f | safe }}",
+        "<title>{{ a }} - {{ b }}</title><textarea>{{ c }}</textarea>",
+        "<noscript><img src=\"{{ a }}\"></noscript><pre>{{ b }}</pre>",
+        "<title>{{ a }} < {{ b }}</title>",
+        "{% for a in b %}<li class=\"c\">{{ a }}</li>{% endfor %}",
+        "{% if a %}<div class=\"b\">{% endif %}c{% if a %}</div>{% endif %}",
+        "{% if a %}<pre>{{ b }}</pre>{% else %}<script>c();</script>{% endif %}",
+        "<title>{% if a %}{{ b }}{% else %}{{ c }} - {{ b }}{% endif %}</title>",
+        "<a class=\"b{% if c %} d{% endif %}\" {% if e %}hidden {% endif %}href=\"/\">",
+        "<a href=\"/\"{% if b %} aria-current=\"page\"{% endif %}>",
+        "<script>{% if a %}b();{% endif %}</script>",
+        "<pre>{% for a in b %}<b>{{ a }}</b>{% endfor %}</pre>",
+        "{% for a in b %}{% if a %}{% else %}{% endif %}{% endfor %}",
+    ];
+    for layout in kept {
+        assert_eq!(written(layout), layout);
+    }
+}
+
+#[test]
 fn the_gaps_that_a_reader_sees_as_a_space_stay() {
+    // The links of the home page's hero stand apart by what the lines of the `for` leave.
+    let hero = concat!(
+        "    <p>\n        {% for item in site.hero %}\n",
+        "        <a href=\"{{ item.url }}\">{{ item.name }}</a>\n        {% endfor %}\n    </p>\n",
+    );
+    let expected = concat!(
+        "    <p>\n{% for item in site.hero %}\n",
+        "<a href=\"{{ item.url }}\">{{ item.name }}</a>\n{% endfor %}\n</p>\n",
+    );
+    assert_eq!(written(hero), expected);
     // The sentences of the footer stand apart by the line break between them.
     let footer =
         "<p>Content licensed <a href=\"/cc0/\">CC0</a>.\n            Source on GitHub.</p>";
@@ -355,6 +422,7 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
         ("<!DOCTYPE html SYSTEM \"a\">", 1, 1, LessThan),
         ("<![CDATA[a]]>", 1, 1, LessThan),
         ("<!-", 1, 1, LessThan),
+        ("<!x>{{ a }}", 1, 1, LessThan),
         ("</!DOCTYPE html>", 1, 1, LessThan),
         ("a\n\n  <", 3, 3, LessThan),
         ("<a href='/'>", 1, 9, UnquotedValue),
@@ -372,6 +440,8 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
         ("<svg><svg></svg><style></styles>", 1, 24, ForeignMarkup),
         ("<svg><textarea><!{# a #}-", 1, 16, ForeignMarkup),
         ("<p>\n<svg><circle r=\"1\"/>", 2, 1, UnclosedElement),
+        ("<svg>{{ a | safe }}</svg>", 1, 9, SafeValue),
+        ("{% if a %}<svg>{% endif %}</svg>", 1, 19, SplitPart),
         ("<p>a <b c</p>", 1, 6, UnclosedTag),
         ("<p\n  class=\"a\"\n", 1, 1, UnclosedTag),
         ("a\n <a href=\"/>b</a>", 2, 2, UnclosedTag),
@@ -391,6 +461,40 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
         ("<svg><title/></svg>", 1, 6, SelfClosed),
         ("a\n<script src=\"/a.js\" />b();", 2, 1, SelfClosed),
         ("<textarea{# a #}/{# b #}>", 1, 1, SelfClosed),
+        ("<p {{ a }}>", 1, 7, ValueInTag),
+        ("<{{ a }}>", 1, 5, ValueInTag),
+        ("<h{{ a }}>", 1, 6, ValueInTag),
+        ("<a href={{ a }}>", 1, 12, ValueInTag),
+        ("<a\n  href=\"/\" {{ a | safe }}>", 2, 15, ValueInTag),
+        ("<title>a <{{ b }}</title>", 1, 14, ValueInTag),
+        ("<script>a = \"{{ b }}\";</script>", 1, 17, ValueInScript),
+        ("<script type=\"a/b\">{{ a | safe }}", 1, 23, ValueInScript),
+        ("<style>a { b: {{ c }} }</style>", 1, 18, ValueInScript),
+        ("<iframe>{{ a }}</iframe>", 1, 12, ValueInScript),
+        ("<p class=\"{{ a | safe }}\">", 1, 14, SafeValue),
+        ("<title>{{ a | safe }}</title>", 1, 11, SafeValue),
+        ("<pre>\n{{ a|safe }}</pre>", 2, 4, SafeValue),
+        ("{% if a %}<pre>{% endif %}</pre>", 1, 19, SplitPart),
+        ("<p\n{% if a %}>{% else %}>{% endif %}", 2, 15, SplitPart),
+        ("{% for a in b %}<a b=\"{% endfor %}", 1, 26, SplitPart),
+        (
+            "<a b=\"\"{% if a %}>{% else %}{% endif %}",
+            1,
+            22,
+            SplitPart,
+        ),
+        ("<pre>{% if a %}</pre><pre>{% endif %}", 1, 30, SplitPart),
+        ("<xmp>{% if a %}</xmp><xmp>{% endif %}", 1, 30, SplitPart),
+        ("<script{% if a %} type=\"b\"{% endif %}>", 1, 30, SplitPart),
+        (
+            "<script {% if a %}type=\"b\" {% endif %}>",
+            1,
+            31,
+            SplitPart,
+        ),
+        // A part that starts right after a name ends in another place, after what parts names.
+        ("<li{% if a %} class=\"b\"{% endif %}>", 1, 27, SplitPart),
+        ("<input {% if a %}checked{% endif %}>", 1, 28, SplitPart),
         ("<script>\n  a = `b`;\n</script>", 2, 7, Backtick),
         ("<script>// It`s</script>", 1, 14, Backtick),
         ("<script>a = \"b\\\n  c\";</script>", 1, 15, BrokenString),
@@ -409,7 +513,10 @@ fn an_error_is_where_the_layout_has_it_after_any_run_and_columns_count_character
         ("é <", 1, 3, LessThan),
         ("<p title=\"é\" é='é'>", 1, 16, UnquotedValue),
         ("é{# é\né #}é\n é{# é #}<é", 3, 10, LessThan),
+        ("{{ é }}é{# é\né #}é\n é{{ é }}<é", 3, 10, LessThan),
         ("<script>\n  é = 1; {# é #} `", 2, 18, Backtick),
+        ("é{% if é %}é\n<p{% endif %}", 2, 6, SplitPart),
+        ("é\r\n{{ é }}<p é {{ é }}>", 2, 16, ValueInTag),
     ];
     for (layout, line, col, kind) in cases {
         assert_eq!(error(layout), Some((line, col, kind)), "{layout:?}");

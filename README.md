@@ -107,8 +107,8 @@ flowchart LR
     has one: between tags, between the attributes of a tag, and in a script without a `type`, which keeps each of its
     lines. The values of attributes and the text of `pre`, `textarea`, `title` and `style` stay as written. It stops
     at an HTML comment, a `<` that starts no tag, a value that is not in double quotes, a tag or such an element that
-    does not close or that ends in `/>`, a `<` in such an element inside `svg`, and in a script at a backtick or a
-    `\` that ends a line.
+    does not close or that ends in `/>`, a `<` in such an element inside `svg`, a `{{ … }}` or a part of an `if` or
+    a `for` that it could not follow, and in a script at a backtick or a `\` that ends a line.
   - `crates/site` (`edu-site`, binary `edu`) — the command-line tool. `edu check` checks `site.yaml`, the layouts in
     `layouts/`, and the YAML header and Markdown text of every page in `content/`, renders every page with them,
     and follows every link between the pages and files of the site and each address of `urls.txt`, the addresses

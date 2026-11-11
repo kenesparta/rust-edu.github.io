@@ -24,9 +24,11 @@ const DOCTYPE: &str = "doctype html";
 const COMMENT: &str = "<!--";
 
 /// The scan of the markup of one layout, from `Markup::default()` on. A layout's own text comes
-/// to [`Markup::text`] run by run, in the order of the source: two runs in a row are neighbours
-/// in every page, as around a comment of the template language. [`Markup::finish`] ends the scan,
-/// and so does its first error.
+/// to [`Markup::text`] run by run, in the order of the source, and the scan hears of what stands
+/// between two runs: of a `{{ … }}` by [`Markup::print`], and of the start and the end of a part
+/// that a page may leave out or repeat by [`Markup::start`] and [`Markup::end`]. Two runs with
+/// nothing between them are neighbours in every page, as around a comment of the template
+/// language. [`Markup::finish`] ends the scan, and so does its first error.
 ///
 /// A run of white space with a line break in it is written as one line break: in text between
 /// tags, between the attributes of a tag, and in a script without a `type`. Everything else is
@@ -44,6 +46,9 @@ pub struct Markup {
     foreign: Vec<Pos>,
     /// The white space that the scan is in.
     run: Run,
+    /// The place, the open `pre` and the open `svg` and `math` at the start of each part that
+    /// has not ended.
+    parts: Vec<(Place, Vec<Pos>, Vec<Pos>)>,
 }
 
 /// Where the scan is in the markup.
@@ -114,10 +119,14 @@ struct Kept {
 /// How the scan reads the text of an element that is no markup.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Reading {
-    /// As it is written: `title`, `textarea`, `noscript`, `style` and `iframe`, and the elements
-    /// of old that an HTML parser still reads so, or shows as written: `xmp`, `listing`,
-    /// `plaintext`, `noembed`, `noframes`.
-    Kept,
+    /// As text in which a browser reads `&lt;` as `<`, so that a `{{ … }}` may write a value
+    /// there: `title` and `textarea`, and `noscript`, whose text is markup for a browser without
+    /// scripts.
+    Escaped,
+    /// As text that a browser takes as it is written, where a `{{ … }}` would write escapes
+    /// that nothing reads: `style` and `iframe`, and the elements of old that an HTML parser
+    /// still reads so, or shows as written: `xmp`, `listing`, `plaintext`, `noembed`, `noframes`.
+    Raw,
     /// As a script with a `type`, which may not be JavaScript.
     Typed,
     /// As JavaScript, where a run of white space with a line break is written as one line break.
@@ -151,8 +160,53 @@ impl Markup {
         Ok(out)
     }
 
+    /// A `{{ … }}` at `pos`, between two runs of text, which writes a value that the scan does
+    /// not see: as it is if `safe`, and escaped for HTML if not. An escaped value is text, in
+    /// text between tags, in the double quotes of an attribute's value, and in `title`, `textarea`
+    /// and `noscript`. A value written as it is has tags of its own, each with its end, so it goes
+    /// only in text between tags, outside `pre`, `svg` and `math`.
+    pub fn print(&mut self, pos: Pos, safe: bool) -> Result<(), Error> {
+        self.run = Run::default();
+        let is_plain = self.pre.is_empty() && self.foreign.is_empty();
+        let kind = match &self.place {
+            Place::Text if safe && !is_plain => ErrorKind::SafeValue,
+            Place::Text => return Ok(()),
+            Place::Tag(tag) if tag.part != Part::Value => ErrorKind::ValueInTag,
+            Place::Kept(kept) if kept.reading != Reading::Escaped => ErrorKind::ValueInScript,
+            // Right after a `<`, a value could spell the end tag.
+            Place::Kept(kept) if kept.tail.is_some() => ErrorKind::ValueInTag,
+            Place::Tag(_) | Place::Kept(_) if safe => ErrorKind::SafeValue,
+            Place::Tag(_) | Place::Kept(_) => return Ok(()),
+        };
+        Err(Error { pos, kind })
+    }
+
+    /// The start of a part of the layout that a page may leave out or repeat: after an `if`, an
+    /// `else` or a `for`.
+    pub fn start(&mut self) {
+        self.run = Run::default();
+        let (pre, foreign) = (self.pre.clone(), self.foreign.clone());
+        self.parts.push((self.place.clone(), pre, foreign));
+    }
+
+    /// The end, at `pos`, of the part that the last [`Markup::start`] without its end started. A
+    /// part ends in the place of the markup where it starts, with the same tag or element open,
+    /// so that the scan is right whether a page has the part, leaves it out or repeats it.
+    pub fn end(&mut self, pos: Pos) -> Result<(), Error> {
+        self.run = Run::default();
+        let Some((place, pre, foreign)) = self.parts.pop() else {
+            return Ok(());
+        };
+        if place == self.place && pre == self.pre && foreign == self.foreign {
+            return Ok(());
+        }
+        let kind = ErrorKind::SplitPart;
+        Err(Error { pos, kind })
+    }
+
     /// Ends the scan at the end of the layout, where no tag is open, and neither a `pre`, an
-    /// `svg`, a `math` nor an element whose text is no markup.
+    /// `svg`, a `math` nor an element whose text is no markup: the layout of a page is itself
+    /// what a `{{ … | safe }}` of `layout.html` writes.
     pub fn finish(self) -> Result<(), Error> {
         let open = self.pre.first().or(self.foreign.first());
         let (pos, kind) = match (self.place, open) {
@@ -290,11 +344,11 @@ impl Markup {
                 self.foreign.pop();
                 return Ok(Place::Text);
             }
+            ("title" | "textarea" | "noscript", false) => Reading::Escaped,
             (
-                "title" | "textarea" | "noscript" | "style" | "iframe" | "xmp" | "listing"
-                | "plaintext" | "noembed" | "noframes",
+                "style" | "iframe" | "xmp" | "listing" | "plaintext" | "noembed" | "noframes",
                 false,
-            ) => Reading::Kept,
+            ) => Reading::Raw,
             ("script", false) if tag.typed => Reading::Typed,
             ("script", false) => Reading::Script,
             _ => return Ok(Place::Text),
@@ -319,7 +373,7 @@ impl Markup {
     fn kept(&mut self, mut kept: Kept, pos: Pos, c: char) -> Result<Place, Error> {
         let is_script = match kept.reading {
             Reading::Script | Reading::Typed => true,
-            Reading::Kept => false,
+            Reading::Escaped | Reading::Raw => false,
         };
         let ends_name = c == '/' || c == '>' || is_space(c);
         match kept.tail.take() {
@@ -369,7 +423,7 @@ impl Markup {
                 _ if BLANKS.contains(&c) => {}
                 _ => kept.escape = None,
             },
-            Reading::Typed | Reading::Kept => {}
+            Reading::Typed | Reading::Raw | Reading::Escaped => {}
         }
         Ok(Place::Kept(kept))
     }

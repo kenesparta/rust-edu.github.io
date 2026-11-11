@@ -18,7 +18,8 @@
 //! of an element whose text is no markup, and reads no JavaScript. What would make it guess is
 //! an error here too: an HTML comment, a `<` that starts no tag, a value that is not in double
 //! quotes, a tag or such an element that does not close, or whose start tag ends in `/>`, a
-//! `<` in such an element inside `svg`, and in a script a backtick or a `\` at the end of a line.
+//! `<` in such an element inside `svg`, a `{{ … }}` or a part of an `if` or a `for` in a place
+//! where the scan could not follow it, and in a script a backtick or a `\` at the end of a line.
 
 mod css;
 mod markup;
@@ -91,6 +92,21 @@ pub enum ErrorKind {
     /// A `\` at the end of a line in a script of a layout, which carries a string on to the next
     /// line, with the blanks that start that line.
     BrokenString,
+    /// A `{{ … }}` in a tag of a layout outside the double quotes of a value, or right after a
+    /// `<` in the text of `title`, `textarea` or `noscript`: its value could change which tag it
+    /// is, or end the element.
+    ValueInTag,
+    /// A `{{ … }}` in a script, a `style` or an `iframe` of a layout, where a browser does not
+    /// read the escapes of HTML that it writes.
+    ValueInScript,
+    /// A `{{ … | safe }}` in a layout elsewhere than in text between tags, outside `pre`, `svg`
+    /// and `math`: it writes markup, as the layout of a page does, whose white space is written
+    /// as that of HTML outside `pre`.
+    SafeValue,
+    /// A part of a layout that a page may leave out or repeat, that of an `if`, an `else` or a
+    /// `for`, which ends in another place of the markup than it starts in, such as inside a tag
+    /// that it opens.
+    SplitPart,
 }
 
 /// `text`, a stylesheet, as the site publishes it: each line without its comments and without the
@@ -188,6 +204,23 @@ impl fmt::Display for ErrorKind {
             Self::BrokenString => {
                 "a `\\` at the end of a line carries a string of a script on to the next line; \
                  write the string on one line, or join two with `+`"
+            }
+            Self::ValueInTag => {
+                "a `{{ … }}` in a tag goes inside the double quotes of a value; write it as \
+                 `name=\"{{ … }}\"`"
+            }
+            Self::ValueInScript => {
+                "a `{{ … }}` is escaped for HTML, which a script or a `style` does not read; \
+                 pass the value in a `data-` attribute"
+            }
+            Self::SafeValue => {
+                "`| safe` writes markup, which goes in text between tags, outside `pre` and \
+                 `svg`; take the filter out, or move the `{{ … }}`"
+            }
+            Self::SplitPart => {
+                "the part that ends here starts in another place of the markup; let an `if` or \
+                 a `for` hold whole elements, or whole attributes after the space that parts \
+                 them, or text of one value"
             }
         })
     }
