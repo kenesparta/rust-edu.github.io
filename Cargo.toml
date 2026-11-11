@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/markdown",
+    "crates/minify",
     "crates/site",
     "crates/template",
     "crates/yaml",
@@ -9,6 +10,7 @@ members = [
 
 [workspace.dependencies]
 edu-markdown = { path = "crates/markdown" }
+edu-minify = { path = "crates/minify" }
 edu-template = { path = "crates/template" }
 edu-yaml = { path = "crates/yaml" }
 

@@ -7,6 +7,10 @@ name = "edu-markdown"
 version = "0.1.0"
 
 [[package]]
+name = "edu-minify"
+version = "0.1.0"
+
+[[package]]
 name = "edu-site"
 version = "0.1.0"
 dependencies = [

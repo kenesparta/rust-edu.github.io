@@ -31,7 +31,7 @@ weaken a check or a test to make it pass.
 | `static/` | `style.css` and the images |
 | `site.yaml` | The site's address, title and description, and the menu, next-step (`hero`) and footer links |
 | `urls.txt` | The addresses that other sites may link to |
-| `crates/` | The generator: `yaml`, `markdown`, `template` and `site`, which has the `edu` binary |
+| `crates/` | The generator: `yaml`, `markdown`, `template`, `minify` and `site`, which has the `edu` binary |
 | `docs/`, `research/` | The editing guide, and the generator's plan and research notes |
 | `public/`, `site/`, `preview/` | Build output, ignored by git. Never edit it. |
 
@@ -54,6 +54,9 @@ weaken a check or a test to make it pass.
   `_` arm is fine only where the input is open text being parsed.
 - **Stable Markdown output.** `crates/markdown/tests/golden/` holds the expected HTML of the site's pages. Change it
   only when the output is meant to change.
+- **Smaller by deleting only.** `edu-minify` takes bytes out of a text and never adds or changes one, so that a copy
+  has the tokens of its source. Do not make it rewrite a value, a name or a quote; what its scan cannot follow is an
+  error with `file:line:col` and a hint, as in the parsers.
 - **Tests with each change.** Each crate has a `tests/` folder, and `crates/site/tests/sites/` holds small example
   sites.
 

@@ -68,7 +68,7 @@ flowchart LR
     SITE --> OUT["Verified Content & HTML"]
 ```
 
-- **Standard library only:** `Cargo.lock` lists only the four crates of this workspace (`edition = "2024"`,
+- **Standard library only:** `Cargo.lock` lists only the five crates of this workspace (`edition = "2024"`,
   `rust-version = "1.99.1"`, `unsafe_code = "forbid"`). CI rejects any external crate in `Cargo.lock` and builds and
   tests with `--network=none --locked --offline` inside a digest-pinned Docker image.
 - **Strict subsets, no panics:** Each parser accepts the subset of YAML 1.2, CommonMark or the template language that
@@ -79,7 +79,7 @@ flowchart LR
   `javascript:` addresses or HTML.
 - **Only the site's own files:** The generator refuses symbolic links, which could bring files from outside the
   repository into the site, and leaves out files and folders whose names start with `.`, such as `.DS_Store`.
-- **Four crates under `crates/`:**
+- **Five crates under `crates/`:**
   - `crates/yaml` (`edu-yaml`) — block-style YAML maps, lists, lists of maps and `---` page headers; every scalar stays
     a string so `no` never becomes `false`.
   - `crates/markdown` (`edu-markdown`) — a two-pass CommonMark subset (paragraphs, `#` headings with ids in any script,
@@ -90,6 +90,11 @@ flowchart LR
     HTML such as `page.content`, `{# … #}` is a comment, and `if`/`else`/`for` handle branches and lists, with one
     outer `layouts/layout.html` wrapping each page layout (`home.html`, `page.html`, `section.html`, `news.html`) at
     `{{ content | safe }}` instead of `extends` and `block`.
+  - `crates/minify` (`edu-minify`) — smaller copies of the texts that the site publishes, made only by deleting bytes:
+    a stylesheet without its comments, without the blanks at the start and the end of each line, and without the lines
+    left empty. It reads no rule or value, so every token stays as written; it keeps a comment that starts with `/*!`,
+    and stops with a line and column at what would make it guess: a comment or a string that does not close, a `\`
+    outside a string, a `url(` without quotes, `@charset`, or a byte order mark after the start.
   - `crates/site` (`edu-site`, binary `edu`) — the command-line tool. `edu check` checks `site.yaml`, the layouts in
     `layouts/`, and the YAML header and Markdown text of every page in `content/`, renders every page with them,
     and follows every link between the pages and files of the site and each address of `urls.txt`, the addresses
