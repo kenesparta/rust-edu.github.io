@@ -79,7 +79,7 @@ flowchart LR
 - **Strict subsets, no panics:** Each parser accepts the subset of YAML 1.2, CommonMark or the template language that
   the site uses, and rejects anything outside it with `file:line:col` and a hint. Input paths never call `unwrap`,
   `expect` or `panic!`, and a seeded random-input test in each parser crate checks 5,000 damaged inputs per run; the
-  one of `edu-minify` also holds each copy to the tokens of its source.
+  two of `edu-minify` also hold each copy to the tokens of its source, or to its tags, values and text.
 - **Safe types of file:** Besides the pages, which have no HTML, `content/` and `static/` hold only images, PDF
   and text files, LaTeX files and stylesheets; an SVG image passes only without scripts, event attributes,
   `javascript:` addresses or HTML, and a stylesheet only as UTF-8 text whose comments and strings `edu-minify` can

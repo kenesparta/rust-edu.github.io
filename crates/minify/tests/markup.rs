@@ -1,5 +1,9 @@
 //! The scan of a layout's markup through its public API: what each layout's own text is written
-//! as, and where each error points.
+//! as, where each error points, and what holds for every layout that passes: its copy is the
+//! layout with bytes deleted, passes again as it is, and has its tags, its values and its text.
+
+use std::fs;
+use std::path::Path;
 
 use edu_minify::ErrorKind::{
     Backtick, BrokenString, ForeignMarkup, HtmlComment, LessThan, SafeValue, SelfClosed, SplitPart,
@@ -62,6 +66,12 @@ fn minified(layout: &str) -> Result<String, Error> {
                     markup.start();
                 }
                 ("{%", "endif" | "endfor") => markup.end(at)?,
+                // A tag that the template language does not have, which only a damaged layout
+                // has: a part with nothing in it.
+                ("{%", _) => {
+                    markup.start();
+                    markup.end(at)?;
+                }
                 _ => {}
             }
             written.push_str(piece);
@@ -86,6 +96,174 @@ fn error(layout: &str) -> Option<(usize, usize, ErrorKind)> {
         .map(|error| (error.pos.line, error.pos.col, error.kind))
 }
 
+/// Whether `copy` is `source` with bytes deleted: none added, changed or moved.
+fn is_cut_from(copy: &str, source: &str) -> bool {
+    let mut source = source.bytes();
+    copy.bytes().all(|byte| source.any(|other| other == byte))
+}
+
+/// `text` with each run of spaces, tabs, line feeds and carriage returns that holds a line feed
+/// as one line feed.
+fn squeezed(text: &str) -> String {
+    let is_blank = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r');
+    let mut squeezed = String::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let (blanks, after) = rest.split_at(rest.len() - rest.trim_start_matches(is_blank).len());
+        squeezed.push_str(if blanks.contains('\n') { "\n" } else { blanks });
+        let (word, after) = after.split_at(after.find(is_blank).unwrap_or(after.len()));
+        squeezed.push_str(word);
+        rest = after;
+    }
+    squeezed
+}
+
+/// The elements whose text is no markup.
+const KEPT: [&str; 11] = [
+    "title",
+    "textarea",
+    "noscript",
+    "style",
+    "iframe",
+    "xmp",
+    "listing",
+    "plaintext",
+    "noembed",
+    "noframes",
+    "script",
+];
+
+/// What a page gets of `layout`, by a reading of its own that shares no code with the scan, for a
+/// layout that the scan lets through: the layout's own text, squeezed, but for the values of
+/// attributes, what is in `pre`, and the text of an element that is no markup other than a script
+/// without a `type`, which are as written. A comment of the template is left out, since it writes
+/// nothing, and another tag of the template is one character, since what it writes is not the
+/// layout's. Two layouts with the same reading differ in nothing but white space that a line break
+/// stands for.
+fn reading(layout: &str) -> String {
+    let own = pieces(layout)
+        .into_iter()
+        .map(|piece| match piece.get(..2) {
+            Some("{#") => "",
+            Some("{{" | "{%") => "\u{1}",
+            _ => piece,
+        });
+    let own: String = own.collect();
+    let is_space = |c: char| matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{c}');
+    let ends_name = |c: char| is_space(c) || c == '/' || c == '>';
+    let (mut read, mut pre, mut rest) = (String::new(), 0_usize, own.as_str());
+    let shown = |text: &str, pre: usize| match pre {
+        0 => squeezed(text),
+        _ => text.to_owned(),
+    };
+    loop {
+        let (text, tag) = rest.split_at(rest.find('<').unwrap_or(rest.len()));
+        read.push_str(&shown(text, pre));
+        if tag.is_empty() {
+            return read;
+        }
+        // The name of the tag, and then names of attributes, each maybe with `="`, a value and
+        // `"`, to the first `>` outside a value.
+        let open = if tag.starts_with("</") { 2 } else { 1 };
+        let named = tag[open..]
+            .find(ends_name)
+            .map_or(tag.len(), |at| open + at);
+        let (name, mut attributes) = tag.split_at(named);
+        read.push_str(name);
+        let mut typed = false;
+        while !attributes.is_empty() && !attributes.starts_with('>') {
+            let names = attributes.find(['=', '>']).unwrap_or(attributes.len());
+            let (names, after) = attributes.split_at(names);
+            let is_type = |name: &str| name.eq_ignore_ascii_case("type");
+            typed |= names.split(|c| is_space(c) || c == '/').any(is_type);
+            read.push_str(&shown(names, pre));
+            attributes = match after.strip_prefix("=\"") {
+                Some(value) => {
+                    let (value, after) = value.split_at(value.find('"').unwrap_or(value.len()));
+                    read.push_str(&format!("=\"{value}"));
+                    after
+                }
+                None => after,
+            };
+            if let Some(after) = attributes.strip_prefix(['=', '"']) {
+                read.push('"');
+                attributes = after;
+            }
+        }
+        rest = attributes.strip_prefix('>').unwrap_or(attributes);
+        read.push('>');
+        let element = name.trim_start_matches(['<', '/']).to_ascii_lowercase();
+        let is_end = name.starts_with("</");
+        if element == "pre" {
+            pre = if is_end {
+                pre.saturating_sub(1)
+            } else {
+                pre + 1
+            };
+        } else if !is_end && KEPT.contains(&element.as_str()) {
+            // The text of the element runs to `</`, its name and white space, `/` or `>`.
+            let (lower, close) = (rest.to_ascii_lowercase(), format!("</{element}"));
+            let mut ends = lower.match_indices(&close);
+            let end = ends.find(|(at, _)| lower[at + close.len()..].starts_with(ends_name));
+            let (text, after) = rest.split_at(end.map_or(rest.len(), |(at, _)| at));
+            let is_javascript = element == "script" && !typed;
+            read.push_str(&shown(text, if is_javascript { pre } else { 1 }));
+            rest = after;
+        }
+    }
+}
+
+/// What each kind of error points at: the character there, or for a tag of the template the mark
+/// before its first word.
+const POINTS: [(ErrorKind, &str); 13] = [
+    (HtmlComment, "<"),
+    (LessThan, "<"),
+    (ForeignMarkup, "<"),
+    (UnclosedTag, "<"),
+    (UnclosedElement, "<"),
+    (SelfClosed, "<"),
+    (UnquotedValue, ""),
+    (ValueInTag, "{{"),
+    (ValueInScript, "{{"),
+    (SafeValue, "{{"),
+    (SplitPart, "{%"),
+    (Backtick, "`"),
+    (BrokenString, "\\"),
+];
+
+/// Asserts of `layout` what holds for every layout, and says whether it passes. If it does, its
+/// copy is `layout` with bytes deleted, passes again as it is, and has the reading of `layout`.
+/// If it does not, the error has a hint and points at what starts the trouble.
+fn check(layout: &str) -> bool {
+    match minified(layout) {
+        Ok(copy) => {
+            assert!(is_cut_from(&copy, layout), "{layout:?} -> {copy:?}");
+            assert_eq!(minified(&copy).as_deref(), Ok(copy.as_str()), "{layout:?}");
+            assert_eq!(reading(&copy), reading(layout), "{layout:?} -> {copy:?}");
+            true
+        }
+        Err(error) => {
+            assert!(error.kind.to_string().contains("; "), "{error}");
+            let line = layout
+                .split('\n')
+                .nth(error.pos.line - 1)
+                .unwrap_or_default();
+            let (before, found): (String, String) = {
+                let mut chars = line.chars();
+                let before = chars.by_ref().take(error.pos.col - 1).collect();
+                (before, chars.collect())
+            };
+            let points = POINTS.iter().find(|(kind, _)| *kind == error.kind);
+            let is_start = points.is_some_and(|(_, start)| match *start {
+                "{{" | "{%" => before.trim_end().ends_with(start),
+                start => found.starts_with(start),
+            });
+            assert!(is_start, "{layout:?}: {error}");
+            false
+        }
+    }
+}
+
 #[test]
 fn a_run_of_white_space_with_a_line_break_is_written_as_one_line_break() {
     let layout = concat!(
@@ -97,6 +275,7 @@ fn a_run_of_white_space_with_a_line_break_is_written_as_one_line_break() {
         "<footer>\t<p>The  end</p> </footer>\n",
     );
     assert_eq!(written(layout), expected);
+    assert!(check(layout));
     let cases = [
         ("", ""),
         ("a", "a"),
@@ -128,6 +307,7 @@ fn a_run_of_white_space_with_a_line_break_is_written_as_one_line_break() {
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -172,6 +352,7 @@ fn white_space_between_the_parts_of_a_tag_is_written_alike_and_a_value_as_it_is(
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -196,6 +377,7 @@ fn what_is_in_pre_and_the_text_of_an_element_that_is_no_markup_stay_as_written()
     ];
     for layout in kept {
         assert_eq!(written(layout), layout);
+        assert!(check(layout), "{layout:?}");
     }
     let cases = [
         (
@@ -233,6 +415,7 @@ fn what_is_in_pre_and_the_text_of_an_element_that_is_no_markup_stay_as_written()
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -247,6 +430,7 @@ fn a_script_keeps_each_line_break_between_two_lines_and_loses_the_blanks_around_
         "if (a < b) {\nb = /a  b/;\n}\n} catch (e) {}\n</script>\n",
     );
     assert_eq!(written(layout), expected);
+    assert!(check(layout));
     let cases = [
         ("<script>a\n\n  b</script>", "<script>a\nb</script>"),
         ("<script>  a  \n  </script>", "<script>  a\n</script>"),
@@ -296,6 +480,7 @@ fn a_script_keeps_each_line_break_between_two_lines_and_loses_the_blanks_around_
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
+        assert!(check(layout), "{layout:?}");
     }
     // A script with a `type` may be no JavaScript, and stays as written.
     let kept = [
@@ -306,6 +491,7 @@ fn a_script_keeps_each_line_break_between_two_lines_and_loses_the_blanks_around_
     ];
     for layout in kept {
         assert_eq!(written(layout), layout);
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -356,6 +542,7 @@ fn a_comment_of_the_template_parts_no_white_space_and_another_tag_of_it_does() {
     ];
     for (layout, expected) in cases {
         assert_eq!(written(layout), expected, "{layout:?}");
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -378,6 +565,7 @@ fn a_value_goes_in_text_and_in_quotes_and_a_part_ends_where_it_starts() {
     ];
     for layout in kept {
         assert_eq!(written(layout), layout);
+        assert!(check(layout), "{layout:?}");
     }
 }
 
@@ -404,6 +592,7 @@ fn the_gaps_that_a_reader_sees_as_a_space_stay() {
         written(spaced),
         "<p>10\u{a0}km \u{a0} or\u{a0}\n6\u{a0}miles</p>"
     );
+    assert!(check(hero) && check(footer) && check(spaced));
 }
 
 #[test]
@@ -504,6 +693,7 @@ fn what_would_make_the_scan_guess_is_an_error_where_it_starts() {
     ];
     for (layout, line, col, kind) in cases {
         assert_eq!(error(layout), Some((line, col, kind)), "{layout:?}");
+        assert!(!check(layout), "{layout:?}");
     }
 }
 
@@ -521,4 +711,99 @@ fn an_error_is_where_the_layout_has_it_after_any_run_and_columns_count_character
     for (layout, line, col, kind) in cases {
         assert_eq!(error(layout), Some((line, col, kind)), "{layout:?}");
     }
+}
+
+/// Every construct that the scan knows, for the random test to damage.
+const SAMPLE: &str = "\
+<!DOCTYPE html>
+<html lang=\"en\">
+<head>
+    <title>{% if page.home %}{{ site.title }}{% else %}{{ page.title }} - {{ site.title }}{% endif %}</title>
+    <meta name=\"description\" content=\"{{ site.description }}\">
+    <script>
+        {# The reader's choice, before the page paints. #}
+        try {
+            var theme = localStorage.getItem(\"theme\");  \r
+            if (theme < \"light\") { theme = '\\n'; }
+        } catch (e) {}
+    </script>
+    <script type=\"module\">let a = `1
+        2`;</script>
+    <style>
+        a::before { content: \"<  >\" }
+    </style>
+</head>
+<body>
+    {# The menu. #}
+    <ul class=\"menu  main\">
+        {% for item in site.menu %}
+        <li><a href=\"{{ item.url }}\"{% if item.here %} aria-current=\"page\"{% endif %}>{{ item.name }}</a></li>
+        {% endfor %}
+    </ul>
+    <p>Content licensed <a href=\"/cc0/\">CC0</a>.
+        Source on\u{a0}<a href=\"/git/\">GitHub</a>.</p>
+    <pre class=\"a\">  two  spaces
+    <b>kept</b>
+
+</pre>
+    <textarea name=\"t\">
+  a
+</textarea>
+    <noscript><img src=\"{{ site.pixel }}\"
+        alt=\"\"></noscript>
+    <svg width=\"18\" viewBox=\"0 0 16 16\"><title>Feed</title><circle cx=\"3\" r=\"1.5\"/></svg>
+    <input type=\"checkbox\" checked
+        disabled>
+    {{ content | safe }}
+</body>
+</html>
+";
+
+#[test]
+fn a_damaged_layout_keeps_its_markup_or_is_an_error_never_a_panic() {
+    assert!(check(SAMPLE));
+    let sample: Vec<char> = SAMPLE.chars().collect();
+    let damage = [
+        '<', '>', '"', '\'', '=', '/', '!', '-', '`', '\\', ' ', '\t', '\r', '\n', '\u{c}',
+        '\u{a0}', '{', '}', '%', '#', 'é', 'e',
+    ];
+    // xorshift64 with a fixed seed: every run tries the same 5,000 layouts, each with two random
+    // characters replaced, inserted or removed.
+    let mut state: u64 = 0x9E37_79B9_7F4A_7C15;
+    let mut passed = 0;
+    for _ in 0..5_000 {
+        let mut text = sample.clone();
+        for _ in 0..2 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let [low, high, how, what, ..] = state.to_le_bytes();
+            let at = usize::from(u16::from_le_bytes([low, high])) % text.len();
+            let c = damage[usize::from(what) % damage.len()];
+            match how % 3 {
+                0 => text[at] = c,
+                1 => text.insert(at, c),
+                _ => _ = text.remove(at),
+            }
+        }
+        let text: String = text.into_iter().collect();
+        passed += usize::from(check(&text));
+    }
+    // Both happen often, so neither what holds for a copy nor what holds for an error goes
+    // unchecked.
+    assert!((1_000..=4_000).contains(&passed), "{passed}");
+}
+
+#[test]
+fn the_layouts_of_this_site_pass_and_keep_their_markup() {
+    // The site of this repository, two folders above this crate. The test reads its layouts as
+    // they are now: copies kept here would be older ones after the next change to them.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).ancestors().nth(2);
+    let mut layouts = 0;
+    for entry in fs::read_dir(root.unwrap().join("layouts")).unwrap() {
+        let layout = fs::read_to_string(entry.unwrap().path()).unwrap();
+        assert!(check(&layout), "{:?}", minified(&layout).err());
+        layouts += 1;
+    }
+    assert!(layouts > 0);
 }
