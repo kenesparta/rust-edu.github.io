@@ -343,6 +343,35 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_is_written_with_less_white_space_and_the_text_of_a_page_as_it_is() {
+        // The layouts of `minified` have indentation, empty lines, comments of the template, a
+        // script, a tag over three lines and a `pre`; its page has a paragraph of two lines and
+        // code with blanks.
+        let out = out("layouts");
+        site(&test_site("minified"), &out, &LIVE).unwrap();
+        // Of the layouts' own text, each run of white space with a line break is one line break,
+        // but in `pre`, and the blanks inside a line stay. Where a `for` stood alone on its line,
+        // an empty line is left; the text of the page ends with a line break of its own.
+        let expected = concat!(
+            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n<title>Home  -  a  test</title>\n",
+            "<link rel=\"stylesheet\" href=\"/style.css\">\n<script>\n",
+            "var theme = \"light  dark\";\nif (theme) {\n",
+            "document.title = theme;  // Set once.\n}\n</script>\n</head>\n<body>\n",
+            "<nav\nclass=\"menu  main\"\naria-label=\"Main\">\n\n",
+            "<a href=\"/\">Home</a>\n\n<a href=\"/notes.txt\">Notes</a>\n\n</nav>\n",
+            "<pre>\n  as   written\n\n    </pre>\n<main>\n<h1>Home</h1>\n",
+            "<p>The page's text\nfollows\u{a0} it.</p>\n<p>A paragraph of\ntwo lines.</p>\n",
+            "<pre><code>code   with\n    its blanks\n\nand its empty line\n</code></pre>\n",
+            "\n\n</main>\n</body>\n</html>\n",
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("index.html")).unwrap(),
+            expected
+        );
+        fs::remove_dir_all(out).unwrap();
+    }
+
+    #[test]
     fn a_stylesheet_is_written_without_its_comments_and_every_other_file_as_it_is() {
         // `minified` holds a page, a stylesheet in `static/`, one beside the page whose extension
         // is in capitals, and a text file that looks like a stylesheet.

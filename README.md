@@ -34,7 +34,9 @@ With Rust installed, `cargo run -p edu-site -- serve --drafts` does the same.
 
 ## 🎨 Layout and Style
 - `layouts/`: the HTML layout of each kind of page; `layout.html` also holds the two short scripts of the theme button,
-  the site's only JavaScript (without it, the site follows the system's theme)
+  the site's only JavaScript (without it, the site follows the system's theme); the build publishes a layout's own
+  text with one line break for each run of white space that has one, and no `{# … #}` comment, so indentation and
+  comments cost a reader nothing
 - `static/style.css`: the whole stylesheet, plain CSS with its colors in token blocks at the top, light and dark; the
   build publishes it without its comments and the blanks around its lines, so a comment costs a reader nothing
 - `site.yaml`: the site's address, title and description, and the menu, next-step (`hero`) and footer links
@@ -65,6 +67,7 @@ flowchart LR
     MD -->|"Markdown body"| MARK
     SY --> YAML
     LY --> TMPL
+    LY -->|"own text"| MIN
     ST --> MIN
     YAML --> SITE
     MARK --> SITE
@@ -118,8 +121,8 @@ flowchart LR
     builds for the `base_url` of `site.yaml`, unless `--base-url` gives another, such as a fork's Pages site; the ids
     of the feeds' posts keep the `base_url` of `site.yaml`. `edu serve` builds the site in memory and serves it at
     http://127.0.0.1:1111 as GitHub Pages would, building it again on a request after a change, and showing the
-    errors, if any, instead of the page. `edu build` writes each stylesheet as `edu-minify` gives it, and `edu serve`
-    serves the same bytes.
+    errors, if any, instead of the page. `edu build` writes each stylesheet and the own text of each layout as
+    `edu-minify` gives them, and `edu serve` serves the same bytes.
 
 ```mermaid
 flowchart LR

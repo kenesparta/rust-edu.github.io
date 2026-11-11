@@ -9,7 +9,7 @@
     <meta name="description" content="{{ site.description }}">
     <link rel="icon" href="/favicon.svg" type="image/svg+xml">
     <script>
-        // The theme button's choice, set before the page paints.
+        {# The theme button's choice, set before the page paints. #}
         try {
             var theme = localStorage.getItem("theme");
             if (theme === "light" || theme === "dark") {
@@ -85,7 +85,7 @@
     </footer>
 
     <script>
-        // The theme button. It shows only where this script runs; without it, the site follows the system's theme.
+        {# The theme button. It shows only where this script runs; without it, the site follows the system's theme. #}
         (function () {
             var root = document.documentElement;
             var button = document.querySelector(".theme-toggle");
@@ -96,7 +96,7 @@
                 return theme ? theme === "dark" : system.matches;
             }
 
-            // The label and the tooltip say what a click does. The icon is style.css's part.
+            {# The label and the tooltip say what a click does. The icon is style.css's part. #}
             function show() {
                 var label = "Switch to the " + (dark() ? "light" : "dark") + " theme";
                 button.setAttribute("aria-label", label);

@@ -31,6 +31,26 @@ stylesheet not saved as UTF-8, at a comment or a string in it that does not clos
 stylesheet does not use, where the check could not be sure to read the stylesheet as a browser does: a `\` outside a
 string, a `url(` whose address is not in quotes, `@charset`, and a byte order mark that is not at the very start.
 
+The layouts of `layouts/` are HTML with the tags of the template language. The site publishes a layout's own text with
+one line break for each run of white space that has a line break in it, so the indentation and the empty lines of a
+layout cost a reader nothing; a space between two words, or between two links on one line, stays as it is. The text
+of a page, the values of attributes and what is in `pre`, `textarea`, `title` or `style` stay as written. A comment
+in a layout is written `{# … #}`, in a script too: the site does not publish it, as it would `<!-- … -->` or the `//`
+comment of a script. A script keeps each of its lines, without the blanks around it. The automatic check stops, with
+its line and column, at what the site's layouts do not use and where the check could not be sure to read a layout as
+a browser does:
+
+- `<!--`, a `<` that starts no tag (write `&lt;`), and an attribute not written as `name="value"`, in double quotes;
+- a tag, a `pre`, a `script` or another element with text of its own that does not close before the layout ends, and
+  a `<script … />` or `<title/>`, which ends such an element in an SVG image only (write `<title></title>`);
+- inside `svg`, a `<` in the text of a `script`, a `style` or a `title`, which a browser reads as markup there;
+- in a script, a backtick and a `\` at the end of a line (join strings with `+`), since their text may run over
+  lines, where each blank counts;
+- `{{ … }}` in a script or in a tag outside the quotes of a value (give a script its values in a `data-` attribute),
+  and `| safe` anywhere but in text between tags, outside `pre` and `svg`;
+- an `if` or a `for` whose part ends in another place of the markup than it starts in, such as inside a tag that it
+  opens; an attribute that is not always there goes whole into the part, after the space before it.
+
 The automatic check stops at a symbolic link, which could bring a file from outside the site into it. Files and
 folders whose names start with `.`, such as `.DS_Store`, are not part of the site.
 

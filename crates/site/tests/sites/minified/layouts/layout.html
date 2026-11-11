@@ -1,2 +1,35 @@
-<link rel="stylesheet" href="/style.css">
-{{ content | safe }}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>{{ page.title }}  -  a  test</title>
+    {# A comment of the template is not published, and leaves no empty line. #}
+    <link rel="stylesheet" href="/style.css">
+    <script>
+        {# In a script too, where a comment of the script itself is published. #}
+        var theme = "light  dark";
+
+        if (theme) {
+            document.title = theme;  // Set once.
+        }
+    </script>
+</head>
+
+<body>
+    <nav
+        class="menu  main"
+        aria-label="Main">
+        {% for item in site.menu %}
+        <a href="{{ item.url }}">{{ item.name }}</a>
+        {% endfor %}
+    </nav>
+    <pre>
+  as   written
+
+    </pre>
+    <main>
+        {{ content | safe }}
+    </main>
+</body>
+
+</html>

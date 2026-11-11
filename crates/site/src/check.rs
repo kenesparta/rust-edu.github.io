@@ -1,9 +1,10 @@
 //! `edu check`: every Markdown page under `content/` starts with a header in the YAML subset whose
-//! values the site can use, its text is in the Markdown subset, the layouts of `layouts/` render
-//! it with the settings of `site.yaml`, and its links go to pages and files of the site, in the
-//! feeds' posts too; and the other files of `content/` and `static/` are of a type that the site
-//! publishes, a stylesheet among them one that the build can write without its comments.
-//! `edu build` checks the same, and renders the pages and the feeds that it writes.
+//! values the site can use, its text is in the Markdown subset, the layouts of `layouts/`, whose
+//! markup the build can write with less white space, render it with the settings of `site.yaml`,
+//! and its links go to pages and files of the site, in the feeds' posts too; and the other files
+//! of `content/` and `static/` are of a type that the site publishes, a stylesheet among them one
+//! that the build can write without its comments. `edu build` checks the same, and renders the
+//! pages and the feeds that it writes.
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
@@ -38,6 +39,8 @@ pub enum PageError {
     Text(edu_markdown::Error),
     /// An error in a layout's text.
     Layout(edu_template::Error),
+    /// An error in the markup of a layout, which the build writes with less white space.
+    Markup(edu_minify::Error),
     /// An error in a stylesheet of `content/` or `static/`, which the build writes without its
     /// comments.
     Style(edu_minify::Error),
@@ -335,6 +338,7 @@ impl fmt::Display for ContentError {
             PageError::Value(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
             PageError::Text(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
             PageError::Layout(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
+            PageError::Markup(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
             PageError::Style(error) => write!(f, "{path}:{}: error: {}", error.pos, error.kind),
             PageError::Link(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
             PageError::File(pos, kind) => write!(f, "{path}:{pos}: error: {kind}"),
@@ -584,9 +588,9 @@ mod tests {
     }
 
     #[test]
-    fn a_stylesheet_that_the_build_cannot_write_smaller_is_an_error_where_the_trouble_starts() {
-        // `unminifiable` holds a stylesheet for each thing that stops the scan of `edu-minify`, and
-        // one in another encoding than UTF-8.
+    fn a_stylesheet_or_a_layout_that_the_build_cannot_write_smaller_is_an_error_where_it_starts() {
+        // `unminifiable` holds a stylesheet and a layout for each thing that stops a scan of
+        // `edu-minify`, and a stylesheet in another encoding than UTF-8.
         let (root, options) = site("unminifiable");
         let Err(Error::Content(errors)) = pages(&root, &options) else {
             panic!("expected content errors");
@@ -605,6 +609,35 @@ mod tests {
              on one line",
             "static/url.css:1:20: error: the address of this `url(` is not in quotes; write it as \
              `url(\"/favicon.svg\")`",
+            "layouts/backtick.html:2:16: error: a backtick in a script is not supported, since its \
+             text may run over lines; join strings with `+`",
+            "layouts/comment.html:2:1: error: `<!--` starts an HTML comment, which a page would \
+             publish, and in a script it moves the end of the script; write a comment as \
+             `{# … #}`",
+            "layouts/element.html:2:1: error: this element is still open at the end of the layout; \
+             close it with its end tag",
+            "layouts/image.html:2:19: error: inside `svg` and `math` a browser reads this `<` as \
+             markup, in a script or a `style` too; write `&lt;` for the character, or move the \
+             element out",
+            "layouts/less-than.html:1:6: error: this `<` starts no tag, end tag or \
+             `<!DOCTYPE html>`; write `&lt;` for the character",
+            "layouts/part.html:2:42: error: the part that ends here starts in another place of the \
+             markup; let an `if` or a `for` hold whole elements, or whole attributes after the \
+             space that parts them, or text of one value",
+            "layouts/safe.html:1:14: error: `| safe` writes markup, which goes in text between \
+             tags, outside `pre` and `svg`; take the filter out, or move the `{{ … }}`",
+            "layouts/self-closed.html:2:1: error: `/>` does not end this element in HTML, where \
+             its text runs on to an end tag; write the end tag, as in `<title></title>`",
+            "layouts/string.html:2:21: error: a `\\` at the end of a line carries a string of a \
+             script on to the next line; write the string on one line, or join two with `+`",
+            "layouts/tag.html:1:1: error: no `>` closes this tag; close it and each of its values, \
+             or write `&lt;` for a `<` that starts no tag",
+            "layouts/value-in-script.html:2:21: error: a `{{ … }}` is escaped for HTML, which a \
+             script or a `style` does not read; pass the value in a `data-` attribute",
+            "layouts/value-in-tag.html:1:7: error: a `{{ … }}` in a tag goes inside the double \
+             quotes of a value; write it as `name=\"{{ … }}\"`",
+            "layouts/value.html:2:13: error: an attribute is written as `name=\"value\"`; put its \
+             value in double quotes, with no space around the `=`",
         ];
         assert_eq!(errors, expected);
     }

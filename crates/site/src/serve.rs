@@ -435,6 +435,25 @@ mod tests {
         assert!(get("/").contains("<p>Welcome again.</p>\n"));
         fs::write(root.join(layouts[1]), "<h2>{{ page.title }}</h2>\n").unwrap();
         assert!(get("/").contains("<h2>Home</h2>\n"));
+        // A layout is served as the build writes it, with a line break for its indentation, and
+        // a mistake in its markup stops the build as a mistake in its tags does.
+        let indented = "<header>\n\n    <h2>{{ page.title }}</h2>\n</header>\n";
+        fs::write(root.join(layouts[1]), indented).unwrap();
+        assert!(get("/").contains("<header>\n<h2>Home</h2>\n</header>\n"));
+        fs::write(
+            root.join(layouts[1]),
+            "<h2 class=wide>{{ page.title }}</h2>\n",
+        )
+        .unwrap();
+        let error = get("/");
+        assert!(
+            error.starts_with("HTTP/1.1 500 Internal Server Error\r\n"),
+            "{error}"
+        );
+        let line = "layouts/home.html:1:11: error: an attribute is written as `name=\"value\"`; \
+                    put its value in double quotes, with no space around the `=`\n";
+        assert!(error.contains(line), "{error}");
+        fs::write(root.join(layouts[1]), "<h2>{{ page.title }}</h2>\n").unwrap();
         // A stylesheet is served as the build writes it, without its comments, and a mistake in
         // it stops the build as a mistake in a page does.
         fs::create_dir(root.join("static")).unwrap();

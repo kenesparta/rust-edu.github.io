@@ -27,7 +27,7 @@ weaken a check or a test to make it pass.
 | Path | What it holds |
 |---|---|
 | `content/` | The pages, one Markdown file each, and the files they link to, such as PDFs |
-| `layouts/` | The HTML layout of each kind of page |
+| `layouts/` | The HTML layout of each kind of page, whose own text the build publishes with less white space |
 | `static/` | `style.css`, which the build publishes without its comments, and the images |
 | `site.yaml` | The site's address, title and description, and the menu, next-step (`hero`) and footer links |
 | `urls.txt` | The addresses that other sites may link to |
@@ -41,6 +41,8 @@ weaken a check or a test to make it pass.
 - `content/` and `static/` hold only the types of file that `docs/editing.md` lists, and no symbolic links.
 - Before you move or remove a page or file, look for its address in `urls.txt`. Keep the old address of a page with
   an `_index.md` that has `redirect_to`, or delete its line on purpose.
+- In a layout, write a comment as `{# … #}`, in a script too, and each attribute as `name="value"`. The check stops
+  at an HTML comment and at the other markup that `docs/editing.md` lists.
 
 ## Generator
 

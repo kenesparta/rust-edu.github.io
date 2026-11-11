@@ -1,12 +1,15 @@
 //! Rendering pages: the settings of `site.yaml`, the layouts of `layouts/`, and the values that
-//! the layouts read for each page of `content/`; and the page of a redirect.
+//! the layouts read for each page of `content/`; and the page of a redirect. A layout's own text
+//! is rendered as `edu-minify` writes it, with one line break for each run of white space that
+//! has one; what a page's text and values bring stays as it is.
 
 use std::cmp::Ordering;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use edu_template::{Template, Value};
+use edu_minify::Markup;
+use edu_template::{Step, Template, Value};
 use edu_yaml::{Entry, Node};
 
 use crate::Error;
@@ -102,12 +105,13 @@ fn value(node: &Node) -> Value {
     }
 }
 
-/// The layouts of `layouts/`, parsed, by file name.
+/// The layouts of `layouts/`, parsed, by file name, each with its own text as the build writes
+/// it.
 pub(crate) struct Layouts(Vec<(String, Template)>);
 
 impl Layouts {
-    /// Parses every `.html` file of `layouts/` in `root`, which must have `layout.html`, or gives
-    /// `None` after an error in a layout, which goes to `errors`.
+    /// Parses every `.html` file of `layouts/` in `root`, which must have `layout.html`, and scans
+    /// its markup, or gives `None` after an error in a layout, which goes to `errors`.
     pub(crate) fn read(root: &Path, errors: &mut Vec<ContentError>) -> Result<Option<Self>, Error> {
         let dir = Path::new("layouts");
         let read_error = |source| Error::Read {
@@ -130,12 +134,10 @@ impl Layouts {
         let mut layouts = Vec::new();
         for name in names {
             let path = dir.join(&name);
-            match Template::parse(&read(root, &path)?) {
+            let parsed = Template::parse(&read(root, &path)?).map_err(PageError::Layout);
+            match parsed.and_then(shortened) {
                 Ok(template) => layouts.push((name, template)),
-                Err(error) => {
-                    let error = PageError::Layout(error);
-                    errors.push(ContentError { path, error });
-                }
+                Err(error) => errors.push(ContentError { path, error }),
             }
         }
         Ok((layouts.len() == count).then_some(Self(layouts)))
@@ -156,6 +158,27 @@ impl Layouts {
             .find(|(key, _)| key == name)
             .map(|(_, layout)| layout)
     }
+}
+
+/// `layout` with each run of its own text as `edu-minify` writes it, once for every page that the
+/// layout renders. The scan goes through the layout in the order of its source, so that it knows
+/// each run's place in the markup, and its error is where the layout's file has it.
+fn shortened(mut layout: Template) -> Result<Template, PageError> {
+    let mut markup = Markup::default();
+    let mut scan = |pos: edu_template::Pos, step: Step<'_>| {
+        let (line, col) = (pos.line, pos.col);
+        let pos = edu_minify::Pos { line, col };
+        match step {
+            Step::Text(text) => *text = markup.text(pos, text)?,
+            Step::Print { safe } => markup.print(pos, safe)?,
+            Step::Start => markup.start(),
+            Step::End => markup.end(pos)?,
+        }
+        Ok(())
+    };
+    layout.walk(&mut scan).map_err(PageError::Markup)?;
+    markup.finish().map_err(PageError::Markup)?;
+    Ok(layout)
 }
 
 /// Renders `page` with its layout, wrapped in `layout.html`. The layouts read the value `site`,
