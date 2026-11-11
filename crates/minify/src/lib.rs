@@ -1,19 +1,22 @@
 //! Makes what the site publishes smaller without changing what a browser reads in it.
 //!
-//! [`css`] reads a stylesheet as CSS's tokens, and for now takes away only what stands before the
-//! first token and after the last one: white space and comments. No token is rewritten: the
-//! result is the stylesheet with bytes taken out.
+//! [`css`] takes a stylesheet and gives it back without its comments, without the white space
+//! around `{`, `}`, `;` and `,` and after the `:` of a declaration, and without the last `;` of a
+//! block. Every other run of white space becomes one character of itself, and the value of a
+//! custom property keeps the white space inside it. No token is rewritten: the result is the
+//! stylesheet with bytes taken out, and its tokens, as CSS Syntax Level 3 splits them, are the
+//! same ones.
 //!
-//! The tokens are names, functions, at-keywords, strings in double quotes, numbers with their
-//! `%` or unit, `#` with a name, and punctuation. `\` escapes, strings in single quotes, `url()`
-//! without quotes, and characters outside ASCII that are not in a string or a comment, are errors
-//! with a line and column; [`ErrorKind`] lists them.
+//! The stylesheet is rules of a selector and a block of declarations, at the top level or inside
+//! `@media` and `@supports`. Comments stand between two rules or two declarations. Other at-rules,
+//! rules inside rules, `\` escapes, strings in single quotes, `url()` without quotes, and
+//! characters outside ASCII that are not in a string or a comment, are errors with a line and
+//! column; [`ErrorKind`] lists them.
 
+mod css;
 mod token;
 
 use std::fmt;
-
-use crate::token::Kind;
 
 /// A line and a column, both counted from 1; columns count characters, not bytes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,19 +52,34 @@ pub enum ErrorKind {
     /// An ASCII character that starts no token of the subset: a control character, `?`, `` ` ``,
     /// or a `#` or `@` with no name after it.
     Unexpected(char),
+    /// An at-rule other than `@media` and `@supports`, by its name with the `@`.
+    UnknownAtRule(String),
+    /// A `;` where a rule can start.
+    StraySemicolon,
+    /// A selector, or an at-rule, that meets a `;`, a `}` or the end before its `{`.
+    NoBlock,
+    /// A `)`, `]` or `}`, which is given, that closes nothing, or not what was opened last.
+    Unbalanced(char),
+    /// A `(`, `[`, function or block without the `)`, `]` or `}` that closes it, which is given.
+    Unclosed(char),
+    /// Something other than `name: value` where a declaration can start, such as a rule inside
+    /// a rule.
+    NotDeclaration,
+    /// A `{` in a value: a rule inside a rule whose selector has a `:`, or a `}` missing above.
+    Nested,
+    /// A comment inside a selector, the prelude of an at-rule or a declaration.
+    CommentInside,
 }
 
-/// The stylesheet `text` as the site publishes it: without the white space and the comments
-/// before its first token and after its last.
+/// The stylesheet `text` as the site publishes it: without its comments, the white space that no
+/// token needs and the last `;` of each block.
 pub fn css(text: &str) -> Result<String, Error> {
-    let tokens = token::scan(text).map_err(|(offset, kind)| Error {
-        pos: pos(text, offset),
-        kind,
-    })?;
-    let start = tokens.first().map_or(0, |token| token.start);
-    let last = tokens.iter().rev().find(|token| token.kind != Kind::End);
-    let end = last.map_or(start, |token| token.end);
-    Ok(text.get(start..end).unwrap_or_default().to_owned())
+    token::scan(text)
+        .and_then(|tokens| css::minify(text, &tokens))
+        .map_err(|(offset, kind)| Error {
+            pos: pos(text, offset),
+            kind,
+        })
 }
 
 /// The line and the column, in characters, of the byte `offset` of `text`.
@@ -113,6 +131,39 @@ impl fmt::Display for ErrorKind {
                     f,
                     "`{c}` starts no token that the minifier knows; remove it"
                 );
+            }
+            Self::UnknownAtRule(name) => {
+                return write!(
+                    f,
+                    "the minifier knows the at-rules `@media` and `@supports`, not `{name}`; \
+                     teach it what the block of `{name}` holds before a stylesheet uses it"
+                );
+            }
+            Self::StraySemicolon => "a `;` between two rules; remove it",
+            Self::NoBlock => "this rule has no block before the next `;` or `}`; write `{ … }`",
+            Self::Unbalanced(close) => {
+                return write!(
+                    f,
+                    "this `{close}` closes nothing; remove it, or open it first"
+                );
+            }
+            Self::Unclosed('}') => "no `}` closes this block; add it",
+            Self::Unclosed(close) => {
+                return write!(
+                    f,
+                    "no `{close}` closes this before the next `;`, `{{` or `}}`; add it"
+                );
+            }
+            Self::NotDeclaration => {
+                "this is not a declaration, `name: value;`; a rule cannot stand inside a rule, so \
+                 a `}` may be missing above"
+            }
+            Self::Nested => {
+                "a `{` in a value; write no rule inside a rule, or add the `;` or `}` missing above"
+            }
+            Self::CommentInside => {
+                "a comment inside a selector or a declaration; put it between two rules or two \
+                 declarations"
             }
         };
         f.write_str(message)

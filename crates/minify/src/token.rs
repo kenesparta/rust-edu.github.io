@@ -1,6 +1,7 @@
 //! The tokens of a stylesheet, as CSS Syntax Level 3 splits it, for the CSS that the site's
-//! stylesheet uses. White space and comments are not tokens here. The scan stops at what it would
-//! have to guess at, and at what the stylesheet has no use for; [`ErrorKind`] lists both.
+//! stylesheet uses. White space and comments are not tokens here: each token knows what stood
+//! before it. The scan stops at what it would have to guess at, and at what the stylesheet has no
+//! use for; [`ErrorKind`] lists both.
 
 use crate::ErrorKind;
 
@@ -8,16 +9,21 @@ use crate::ErrorKind;
 /// other spaces, such as U+00A0, are not white space in CSS.
 const SPACE: [char; 5] = [' ', '\t', '\n', '\r', '\x0C'];
 
-/// The first error of a scan, at a byte of the stylesheet.
+/// The first error of a scan or of a pass, at a byte of the stylesheet.
 pub(crate) type Fail = (usize, ErrorKind);
 
-/// A token of a stylesheet.
+/// A token, and what stood between it and the token before it.
 pub(crate) struct Token {
     pub(crate) kind: Kind,
     /// The byte of the stylesheet where the token starts.
     pub(crate) start: usize,
     /// The byte after the token's last.
     pub(crate) end: usize,
+    /// One character of the white space before the token, a space when it has one and its last
+    /// character when not; `None` when the token touches the one before it, or a comment.
+    pub(crate) space: Option<char>,
+    /// Where the first comment before the token starts.
+    pub(crate) comment: Option<usize>,
 }
 
 /// What a token is, as far as a stylesheet's blocks tell tokens apart.
@@ -66,16 +72,32 @@ pub(crate) enum Bracket {
     Square,
 }
 
+impl Bracket {
+    /// The character that closes the bracket.
+    pub(crate) fn close(self) -> char {
+        match self {
+            Self::Round => ')',
+            Self::Square => ']',
+        }
+    }
+}
+
 /// Reads `text`, a stylesheet, to its end and gives its tokens; the last one is [`Kind::End`].
 pub(crate) fn scan(text: &str) -> Result<Vec<Token>, Fail> {
     let mut scanner = Scanner { text, offset: 0 };
     let mut tokens = Vec::new();
     loop {
-        scanner.gap()?;
+        let (space, comment) = scanner.gap()?;
         let start = scanner.offset;
         let kind = scanner.token()?;
         let end = scanner.offset;
-        tokens.push(Token { kind, start, end });
+        tokens.push(Token {
+            kind,
+            start,
+            end,
+            space,
+            comment,
+        });
         if kind == Kind::End {
             return Ok(tokens);
         }
@@ -100,19 +122,25 @@ impl<'a> Scanner<'a> {
         self.text.as_bytes().get(self.offset + ahead).copied()
     }
 
-    /// Moves past the white space and the comments at the offset.
-    fn gap(&mut self) -> Result<(), Fail> {
+    /// Moves past the white space and the comments at the offset, and gives the character that
+    /// stands for the white space and where the first comment starts.
+    fn gap(&mut self) -> Result<(Option<char>, Option<usize>), Fail> {
+        let (mut space, mut comment) = (None, None);
         loop {
             let rest = self.rest();
-            if rest.starts_with(SPACE) {
+            if let Some(c) = rest.chars().next().filter(|c| SPACE.contains(c)) {
+                if space != Some(' ') {
+                    space = Some(c);
+                }
                 self.offset += 1;
             } else if rest.starts_with("/*") {
                 let Some(len) = rest.get(2..).and_then(|inside| inside.find("*/")) else {
                     return Err((self.offset, ErrorKind::OpenComment));
                 };
+                comment = comment.or(Some(self.offset));
                 self.offset += len + 4;
             } else {
-                return Ok(());
+                return Ok((space, comment));
             }
         }
     }
