@@ -2,6 +2,7 @@
 resolver = "3"
 members = [
     "crates/markdown",
+    "crates/minify",
     "crates/site",
     "crates/template",
     "crates/yaml",
